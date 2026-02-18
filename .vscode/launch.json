@@ -1,0 +1,12 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Build AVR",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/firmware.elf",
+            "preLaunchTask": "Build AVR"
+        }
+    ]
+}

@@ -1,0 +1,12 @@
+{
+    "AVR.reporter.arguments": [
+        "-C"
+    ],
+    "AVR.source.compiler": "/usr/bin/avr-gcc",
+    "AVR.programmer.tool": "/usr/bin/avrdude",
+    "AVR.programmer.definitions": "/usr/share/metainfo/avrdude.metainfo.xml",
+    "AVR.source.libraries": [
+        "/usr/lib/avr/include"
+    ],
+    "cmake.sourceDirectory": "/home/oem/devel/atmega328trainer/src"
+}

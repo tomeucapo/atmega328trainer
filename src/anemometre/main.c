@@ -1,4 +1,5 @@
 #define F_CPU 8000000UL
+#define __AVR_ATmega328P__
 
 #include <avr/io.h>
 #include <avr/interrupt.h>
@@ -17,7 +18,7 @@
 // filtro anti ruido (ajustar segun sensor)
 #define MIN_PERIOD 100   // ticks timer (50us)
 
-// nº overflows antes de declarar velocidad 0
+// nï¿½ overflows antes de declarar velocidad 0
 #define MAX_OVERFLOWS_NO_SIGNAL 5
 
 // =====================
@@ -95,28 +96,28 @@ ISR(TIMER1_OVF_vect)
 	overflow_counter++;
 }
 
-// =====================
-// MAIN
-// =====================
-
-int main(void)
+void io_init()
 {
 	PORTD = 0x00;
 	DDRD = 0b00100000;
-	
+}
+
+int main(void)
+{
+	io_init();	
 	uart_init();
 	timer1_init();
 
-	
 	sei();
 
 	float frequency = 0;
 	float velocidad = 0;
 	char buffer[32];
 
+	uart_tx_string("*** ATMEGA328P Anemometer 1.0\r\n");
 	while(1)
 	{
-		// detectar ausencia de señal
+		// detectar ausencia de seï¿½al
 		if(overflow_counter > MAX_OVERFLOWS_NO_SIGNAL)
 		{
 			velocidad = 0;
@@ -127,22 +128,21 @@ int main(void)
 			sbi(PORTD, PD5);
 			
 			new_data = 0;
-
 			if(period != 0)
 			{
-				frequency = 1000000.0f / period;
+				frequency = 100000.0f / period;
 				velocidad = frequency * FACTOR_KMH;
 				cbi(PORTD, PD5);
 			}
+
+			dtostrf(velocidad,6,3,buffer);
+
+			uart_tx_string("VELOC=");
+			uart_tx_string(buffer);
+			uart_tx_string("\r\n");
 		}
 
-		dtostrf(velocidad,6,3,buffer);
-
-		uart_tx_string("Velocidad km/h: ");
-		uart_tx_string(buffer);
-		uart_tx_string("\r\n");
-
-		// pequeño delay sin bloquear timer
+		// pequeï¿½o delay sin bloquear timer
 		for(uint32_t i=0;i<50000;i++)
 			__asm__("nop");
 	}
