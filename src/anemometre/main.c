@@ -193,20 +193,6 @@ int main(void)
 {
     io_init();
     uart_init();
-
-char buffer[16];
-
-itoa(UCSR0B, buffer, 16);
-
-uart_tx_string("UCSR0B=");
-uart_tx_string(buffer);
-uart_tx_string("\r\n");
-    if (UCSR0B & (1<<RXEN0))
-    uart_tx_string("RX ON\r\n");
-else
-    uart_tx_string("RX OFF\r\n");
-
-    
     timer1_init();
     timer0_init();
     rain_init();
@@ -263,8 +249,6 @@ else
                 rx_buffer[rx_index] = 0;
                 rx_index = 0;
 
-                // -----------------
-
                 if(strcmp(rx_buffer,"@STAT_ANEMO") == 0)
                 {
                     dtostrf(velocidad,6,3,buffer);
@@ -273,9 +257,6 @@ else
                     uart_tx_string(buffer);
                     uart_tx_string(" km/h\r\n");
                 }
-
-                // -----------------
-
                 else if(strcmp(rx_buffer,"@STAT_RAIN") == 0)
                 {
                     uint32_t count;
@@ -307,9 +288,6 @@ else
 
                     uart_tx_string("\r\n");
                 }
-
-                // -----------------
-
                 else if(strcmp(rx_buffer,"@RESET_RAIN") == 0)
                 {
                     cli();
@@ -318,9 +296,6 @@ else
 
                     uart_tx_string("RAIN RESET OK\r\n");
                 }
-
-                // -----------------
-
                 else
                 {
                     uart_tx_string("ERR\r\n");
