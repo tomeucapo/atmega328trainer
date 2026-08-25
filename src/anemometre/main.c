@@ -258,6 +258,8 @@ int main(void)
         {
             char c = UDR0;
 
+			uart_tx_char(c);
+
             if(c == '\r' || c == '\n')
             {
                 rx_buffer[rx_index] = 0;
