@@ -193,6 +193,20 @@ int main(void)
 {
     io_init();
     uart_init();
+
+char buffer[16];
+
+itoa(UCSR0B, buffer, 16);
+
+uart_tx_string("UCSR0B=");
+uart_tx_string(buffer);
+uart_tx_string("\r\n");
+    if (UCSR0B & (1<<RXEN0))
+    uart_tx_string("RX ON\r\n");
+else
+    uart_tx_string("RX OFF\r\n");
+
+    
     timer1_init();
     timer0_init();
     rain_init();
@@ -206,17 +220,6 @@ int main(void)
 
     uart_tx_string("*** ATMEGA328P WEATHER 1.0\r\n");
 
-while(1)
-{
-    if (UCSR0A & (1<<RXC0))
-    {
-        char c = UDR0;
-
-        uart_tx_string("REC:");
-        uart_tx_char(c);
-        uart_tx_string("\r\n");
-    }
-}
 
     while(1)
     {
