@@ -136,12 +136,15 @@ void timer0_init(void)
 }
 
 ISR(TIMER0_COMPA_vect)
-{
+{  
+    static uint16_t blink_counter = 0;
+
     millis_counter++;
 
-    if(millis_counter % 500 == 0)
+    if(++blink_counter >= 500)
     {
         PORTD ^= (1<<PORTD6);
+        blink_counter = 0;
     }
 }
 
