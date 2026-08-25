@@ -209,6 +209,20 @@ int main(void)
 
     while(1)
     {
+        static uint32_t last_blink = 0;
+
+        if((millis_counter - last_blink) >= 1000)
+        {
+            PORTD |= (1<<PORTD7);   // ON
+
+            for(uint8_t i=0;i<10000;i++)
+                __asm__("nop");
+
+            PORTD &= ~(1<<PORTD7);  // OFF
+
+            last_blink = millis_counter;
+        }
+        
         // ====================================
         // ANEMOMETRO
         // ====================================
