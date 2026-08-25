@@ -33,7 +33,7 @@ volatile uint16_t period = 0;
 volatile uint8_t new_data = 0;
 volatile uint8_t overflow_counter = 0;
 
-volatile float velocidad = 0;
+float velocidad = 0;
 
 // ======================================================
 // PLUVIOMETRO
@@ -58,7 +58,6 @@ void uart_init(void)
     UBRR0L = UBRR_VALUE;
 
     UCSR0B = (1<<RXEN0) | (1<<TXEN0);
-
     UCSR0C = (1<<UCSZ01) | (1<<UCSZ00);
 }
 
@@ -102,7 +101,6 @@ void timer1_init(void)
 ISR(TIMER1_CAPT_vect)
 {
     uint16_t capture = ICR1;
-
     uint16_t diff = capture - last_capture;
 
     last_capture = capture;
@@ -110,9 +108,7 @@ ISR(TIMER1_CAPT_vect)
     if(diff > MIN_PERIOD)
     {
         period = diff;
-
         new_data = 1;
-
         overflow_counter = 0;
     }
 }
@@ -153,11 +149,8 @@ ISR(TIMER0_COMPA_vect)
 void rain_init(void)
 {
     DDRB &= ~(1<<DDB1);
-
     PORTB |= (1<<PORTB1);
-
     PCICR |= (1<<PCIE0);
-
     PCMSK0 |= (1<<PCINT1);
 }
 
@@ -176,7 +169,6 @@ ISR(PCINT0_vect)
         if((now - rain_last_pulse) > RAIN_DEBOUNCE_MS)
         {
             rain_count++;
-
             rain_last_pulse = now;
         }
     }
@@ -190,9 +182,7 @@ ISR(PCINT0_vect)
 
 void io_init(void)
 {
-    PORTD = 0x00;
-
-    DDRD = 0b00100000;
+    DDRD = (1<<DDD5) | (1<<DDD6) | (1<<DDD7);
 }
 
 // ======================================================
@@ -202,26 +192,31 @@ void io_init(void)
 int main(void)
 {
     io_init();
-
     uart_init();
-
     timer1_init();
-
     timer0_init();
-
     rain_init();
 
     sei();
 
     float frequency = 0;
-
     char buffer[32];
-
     char rx_buffer[32];
-
     uint8_t rx_index = 0;
 
     uart_tx_string("*** ATMEGA328P WEATHER 1.0\r\n");
+
+while(1)
+{
+    if (UCSR0A & (1<<RXC0))
+    {
+        char c = UDR0;
+
+        uart_tx_string("REC:");
+        uart_tx_char(c);
+        uart_tx_string("\r\n");
+    }
+}
 
     while(1)
     {
@@ -236,18 +231,18 @@ int main(void)
 
         if(new_data)
         {
+            uint16_t local_period;
+
+            cli();
+            local_period = period;
             new_data = 0;
+            sei();
 
-            sbi(PORTD, PD5);
-
-            if(period != 0)
+            if(local_period != 0)
             {
-                frequency = 100000.0f / period;
-
+                frequency = 100000.0f / local_period;
                 velocidad = frequency * FACTOR_KMH;
             }
-
-            cbi(PORTD, PD5);
         }
 
         // ====================================
@@ -263,7 +258,6 @@ int main(void)
             if(c == '\r' || c == '\n')
             {
                 rx_buffer[rx_index] = 0;
-
                 rx_index = 0;
 
                 // -----------------
@@ -282,15 +276,11 @@ int main(void)
                 else if(strcmp(rx_buffer,"@STAT_RAIN") == 0)
                 {
                     uint32_t count;
-
                     float mm;
 
                     cli();
-
                     count = rain_count;
-
                     sei();
-
                     mm = count * RAIN_MM_PER_TIP;
 
                     uart_tx_string("RAIN_COUNT=");
