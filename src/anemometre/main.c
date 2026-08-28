@@ -13,7 +13,7 @@
 #define BAUD 9600
 #define UBRR_VALUE ((F_CPU/16/BAUD)-1)
 
-#define FACTOR_KMH 3.6f
+#define FACTOR_KMH 3.2f
 
 #define MIN_PERIOD 100
 
@@ -184,6 +184,28 @@ ISR(PCINT0_vect)
     old_state = new_state;
 }
 
+void calculate_anemo_velocity()
+{
+        if(overflow_counter > MAX_OVERFLOWS_NO_SIGNAL)
+            velocidad = 0;
+        
+        if(!new_data)
+            return;
+        
+        float frequency = 0;
+        uint16_t local_period;
+
+        cli();
+        local_period = period;
+        new_data = 0;
+        sei();
+
+        if(local_period != 0)
+        {
+           frequency = 100000.0f / local_period;
+           velocidad = frequency * FACTOR_KMH;
+        }
+}
 // ======================================================
 // IO
 // ======================================================
@@ -207,7 +229,7 @@ int main(void)
 
     sei();
 
-    float frequency = 0;
+
     char buffer[32];
     char rx_buffer[32];
     uint8_t rx_index = 0;
@@ -221,26 +243,7 @@ int main(void)
         // ANEMOMETRO
         // ====================================
 
-        if(overflow_counter > MAX_OVERFLOWS_NO_SIGNAL)
-        {
-            velocidad = 0;
-        }
-
-        if(new_data)
-        {
-            uint16_t local_period;
-
-            cli();
-            local_period = period;
-            new_data = 0;
-            sei();
-
-            if(local_period != 0)
-            {
-                frequency = 100000.0f / local_period;
-                velocidad = frequency * FACTOR_KMH;
-            }
-        }
+        calculate_anemo_velocity();
 
         // ====================================
         // SERIAL COMMANDS
