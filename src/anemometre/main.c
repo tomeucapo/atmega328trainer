@@ -5,6 +5,9 @@
 #include <compat/deprecated.h>
 #include <stdlib.h>
 #include <string.h>
+#include <util/delay.h>
+#include <stdint.h>
+#include "ds18b20.h"
 
 // ======================================================
 // CONFIG
@@ -22,6 +25,7 @@
 #define RAIN_DEBOUNCE_MS 100
 
 #define RAIN_MM_PER_TIP 0.2f
+
 
 // ======================================================
 // ANEMOMETRO
@@ -206,6 +210,8 @@ void calculate_anemo_velocity()
            velocidad = frequency * FACTOR_KMH;
         }
 }
+
+
 // ======================================================
 // IO
 // ======================================================
@@ -226,6 +232,7 @@ int main(void)
     timer1_init();
     timer0_init();
     rain_init();
+    ds18b20_init();
 
     sei();
 
@@ -298,6 +305,22 @@ int main(void)
                     uart_tx_string(buffer);
 
                     uart_tx_string("\r\n");
+                }
+                else if(strcmp(rx_buffer,"@STAT_TEMP") == 0)
+                {
+                    float temp = ds18b20_get_temp();
+
+                    if(temp == DS18B20_ERROR_TEMP)
+                    {
+                        uart_tx_string("TEMP_ERR\r\n");
+                    }
+                    else
+                    {
+                        uart_tx_string("TEMP=");
+                        dtostrf(temp,6,3,buffer);
+                        uart_tx_string(buffer);
+                        uart_tx_string(" C\r\n");
+                    }
                 }
                 else if(strcmp(rx_buffer,"@RESET_RAIN") == 0)
                 {
