@@ -1,3 +1,6 @@
+#include <stdint.h>
+#include <util/delay.h>
+#include "onewire.h" 
 #include "ds18b20.h"
 
 // ======================================================

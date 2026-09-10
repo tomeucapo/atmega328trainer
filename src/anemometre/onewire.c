@@ -1,23 +1,26 @@
-#include "onewrite.h"
+#include <stdint.h>
+#include <util/delay.h>
+#include <avr/interrupt.h>
+#include "onewire.h"
 
-static void onewire_low(void)
+void onewire_low(void)
 {
     DS18B20_PORT &= ~(1<<DS18B20_BIT);
     DS18B20_DDR |= (1<<DS18B20_BIT);
 }
 
-static void onewire_release(void)
+void onewire_release(void)
 {
     DS18B20_DDR &= ~(1<<DS18B20_BIT);
     DS18B20_PORT |= (1<<DS18B20_BIT);
 }
 
-static uint8_t onewire_read_pin(void)
+uint8_t onewire_read_pin(void)
 {
     return (DS18B20_PIN & (1<<DS18B20_BIT)) ? 1 : 0;
 }
 
-static uint8_t onewire_reset(void)
+uint8_t onewire_reset(void)
 {
     uint8_t presence;
 
@@ -33,7 +36,7 @@ static uint8_t onewire_reset(void)
     return presence; // 0 = dispositivo presente
 }
 
-static void onewire_write_bit(uint8_t bit)
+void onewire_write_bit(uint8_t bit)
 {
     cli();
     if(bit)
@@ -53,7 +56,7 @@ static void onewire_write_bit(uint8_t bit)
     sei();
 }
 
-static uint8_t onewire_read_bit(void)
+uint8_t onewire_read_bit(void)
 {
     uint8_t bit;
 
@@ -69,7 +72,7 @@ static uint8_t onewire_read_bit(void)
     return bit;
 }
 
-static void onewire_write_byte(uint8_t byte)
+void onewire_write_byte(uint8_t byte)
 {
     for(uint8_t i = 0; i < 8; i++)
     {
@@ -78,7 +81,7 @@ static void onewire_write_byte(uint8_t byte)
     }
 }
 
-static uint8_t onewire_read_byte(void)
+uint8_t onewire_read_byte(void)
 {
     uint8_t data = 0;
 

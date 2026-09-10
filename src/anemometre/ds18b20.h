@@ -1,11 +1,5 @@
 #ifndef DS18B20_H
 #define DS18B20_H
-
-#define DS18B20_DDR  DDRB
-#define DS18B20_PORT PORTB
-#define DS18B20_PIN  PINB
-#define DS18B20_BIT  PB2
-
 #define DS18B20_ERROR_TEMP (-127.0f)
 
 #define DS18B20_CONFIG 0x1F  // resolucion 9-bit (0.5 C, ~94 ms)
