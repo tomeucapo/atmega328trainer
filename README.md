@@ -4,6 +4,8 @@ Basic board for practicing with the ATMega328P microcontroller. It includes an o
 
 https://www.pcbway.com/project/shareproject/Anemometer_with_ATMega128P_fbefd825.html
 
+<img src="images/board.jpg" alt="Board" width="400">
+
 ## Weather station base
 
 This first version supports wind, rain and temperature sensors can read from USB port with simple commands:
