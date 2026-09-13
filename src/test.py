@@ -48,6 +48,15 @@ def get_anemo():
 
     return 0
 
+def get_temp():
+    lines = send_command("@STAT_TEMP")
+
+    for line in lines:
+        m = re.search(r"TEMP=([0-9.]+)", line)
+        if m:
+            return float(m.group(1))
+
+    return 0
 
 def get_rain():
     lines = send_command("@STAT_RAIN")
@@ -79,9 +88,10 @@ try:
 
         viento = get_anemo()
         lluvia = get_rain()
+        temp = get_temp()
 
         ts = time.strftime("%Y-%m-%d %H:%M:%S")
-        print(f"{ts}\t{viento}\t{lluvia['lm2']}")
+        print(f"{ts}\t{viento}\t{lluvia['lm2']}\t{temp} C")
 
         #print(f"Viento : {viento} km/h")
         #print(f"Lluvia : {lluvia['count']} pulsos")

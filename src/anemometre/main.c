@@ -16,15 +16,10 @@
 #define UBRR_VALUE ((F_CPU/16/BAUD)-1)
 
 #define FACTOR_KMH 3.2f
-
 #define MIN_PERIOD 100
-
 #define MAX_OVERFLOWS_NO_SIGNAL 5
-
 #define RAIN_DEBOUNCE_MS 100
-
-#define RAIN_MM_PER_TIP 0.2f
-
+#define RAIN_MM_PER_TIP 0.3f
 
 // ======================================================
 // ANEMOMETRO
