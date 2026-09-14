@@ -487,7 +487,7 @@
       "gencad": "",
       "idf": "",
       "netlist": "",
-      "plot": "",
+      "plot": "gerber_10/",
       "pos_files": "",
       "specctra_dsn": "",
       "step": "",
@@ -609,6 +609,11 @@
     "subpart_first_id": 65,
     "subpart_id_separator": 0
   },
-  "sheets": [],
+  "sheets": [
+    [
+      "b447da7a-980e-43bd-913f-d9c3705cf5c6",
+      "Root"
+    ]
+  ],
   "text_variables": {}
 }

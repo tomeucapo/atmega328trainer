@@ -1,5 +1,7 @@
 *.o
+*~
 *.elf
 *.map
+*.zip
 src/build/
 build/
