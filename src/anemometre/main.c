@@ -1,10 +1,14 @@
+#ifndef F_CPU
 #define F_CPU 8000000UL
+#endif
 
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <compat/deprecated.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
+#include "ds18b20.h"
 
 // ======================================================
 // CONFIG
@@ -13,15 +17,11 @@
 #define BAUD 9600
 #define UBRR_VALUE ((F_CPU/16/BAUD)-1)
 
-#define FACTOR_KMH 3.6f
-
+#define FACTOR_KMH 3.2f
 #define MIN_PERIOD 100
-
 #define MAX_OVERFLOWS_NO_SIGNAL 5
-
 #define RAIN_DEBOUNCE_MS 100
-
-#define RAIN_MM_PER_TIP 0.2f
+#define RAIN_MM_PER_TIP 0.3f
 
 // ======================================================
 // ANEMOMETRO
@@ -184,6 +184,30 @@ ISR(PCINT0_vect)
     old_state = new_state;
 }
 
+void calculate_anemo_velocity()
+{
+        if(overflow_counter > MAX_OVERFLOWS_NO_SIGNAL)
+            velocidad = 0;
+        
+        if(!new_data)
+            return;
+        
+        float frequency = 0;
+        uint16_t local_period;
+
+        cli();
+        local_period = period;
+        new_data = 0;
+        sei();
+
+        if(local_period != 0)
+        {
+           frequency = 100000.0f / local_period;
+           velocidad = frequency * FACTOR_KMH;
+        }
+}
+
+
 // ======================================================
 // IO
 // ======================================================
@@ -204,10 +228,11 @@ int main(void)
     timer1_init();
     timer0_init();
     rain_init();
+    ds18b20_init();
 
     sei();
 
-    float frequency = 0;
+
     char buffer[32];
     char rx_buffer[32];
     uint8_t rx_index = 0;
@@ -221,26 +246,7 @@ int main(void)
         // ANEMOMETRO
         // ====================================
 
-        if(overflow_counter > MAX_OVERFLOWS_NO_SIGNAL)
-        {
-            velocidad = 0;
-        }
-
-        if(new_data)
-        {
-            uint16_t local_period;
-
-            cli();
-            local_period = period;
-            new_data = 0;
-            sei();
-
-            if(local_period != 0)
-            {
-                frequency = 100000.0f / local_period;
-                velocidad = frequency * FACTOR_KMH;
-            }
-        }
+        calculate_anemo_velocity();
 
         // ====================================
         // SERIAL COMMANDS
@@ -295,6 +301,22 @@ int main(void)
                     uart_tx_string(buffer);
 
                     uart_tx_string("\r\n");
+                }
+                else if(strcmp(rx_buffer,"@STAT_TEMP") == 0)
+                {
+                    float temp = ds18b20_get_temp();
+
+                    if(temp == DS18B20_ERROR_TEMP)
+                    {
+                        uart_tx_string("TEMP_ERR\r\n");
+                    }
+                    else
+                    {
+                        uart_tx_string("TEMP=");
+                        dtostrf(temp,6,3,buffer);
+                        uart_tx_string(buffer);
+                        uart_tx_string(" C\r\n");
+                    }
                 }
                 else if(strcmp(rx_buffer,"@RESET_RAIN") == 0)
                 {

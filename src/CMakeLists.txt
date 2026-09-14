@@ -1,24 +1,28 @@
-project(avr_project C ASM)
-
-cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 3.16)
 
 # MCU y frecuencia
 set(MCU atmega328p)
 set(F_CPU 8000000UL)
 
-# Nombre del ejecutable
-set(TARGET firmware)
-
 # ==============================
-# Toolchain AVR
+# Toolchain AVR (debe ir antes de project())
 # ==============================
 
-# Ejecutables AVR
 set(CMAKE_SYSTEM_NAME Generic)
+set(CMAKE_SYSTEM_PROCESSOR avr)
+
 set(CMAKE_C_COMPILER avr-gcc)
 set(CMAKE_ASM_COMPILER avr-gcc)
 set(CMAKE_OBJCOPY avr-objcopy)
 set(CMAKE_SIZE avr-size)
+
+# Evita intentar enlazar programas de prueba durante la deteccion
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+
+project(avr_project C ASM)
+
+# Nombre del ejecutable
+set(TARGET firmware)
 
 # ==============================
 # Flags de compilación
