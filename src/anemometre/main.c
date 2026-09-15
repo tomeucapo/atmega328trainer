@@ -9,6 +9,7 @@
 #include <string.h>
 #include <stdint.h>
 #include "ds18b20.h"
+#include "mcp23017.h"
 
 // ======================================================
 // CONFIG
@@ -218,6 +219,37 @@ void io_init(void)
 }
 
 // ======================================================
+// MCP23017 COMANDOS SERIE
+// ======================================================
+
+static uint8_t parse_mcp_pin(const char *s, uint8_t *pin)
+{
+    uint8_t value = 0;
+
+    while(*s == ' ')
+        s++;
+
+    if(*s < '0' || *s > '9')
+        return 0;
+
+    while(*s >= '0' && *s <= '9')
+    {
+        value = value * 10 + (*s - '0');
+
+        if(value > 15)
+            return 0;
+
+        s++;
+    }
+
+    if(*s != '\0')
+        return 0;
+
+    *pin = value;
+    return 1;
+}
+
+// ======================================================
 // MAIN
 // ======================================================
 
@@ -229,6 +261,11 @@ int main(void)
     timer0_init();
     rain_init();
     ds18b20_init();
+
+    // MCP23017 (PC4=SDA, PC5=SCL)
+    mcp23017_init();
+    mcp23017_direction(MCP23017_PORTA, 0x00); // reles: salidas
+    mcp23017_direction(MCP23017_PORTB, 0x00); // LEDs: salidas
 
     sei();
 
@@ -325,6 +362,42 @@ int main(void)
                     sei();
 
                     uart_tx_string("RAIN RESET OK\r\n");
+                }
+                else if(strncmp(rx_buffer,"@MCP_ON",7) == 0)
+                {
+                    uint8_t pin;
+
+                    if(parse_mcp_pin(rx_buffer + 7, &pin))
+                    {
+                        mcp23017_write_pin(pin / 8, pin % 8, 1);
+
+                        uart_tx_string("MCP_ON=");
+                        utoa(pin, buffer, 10);
+                        uart_tx_string(buffer);
+                        uart_tx_string("\r\n");
+                    }
+                    else
+                    {
+                        uart_tx_string("ERR\r\n");
+                    }
+                }
+                else if(strncmp(rx_buffer,"@MCP_OFF",8) == 0)
+                {
+                    uint8_t pin;
+
+                    if(parse_mcp_pin(rx_buffer + 8, &pin))
+                    {
+                        mcp23017_write_pin(pin / 8, pin % 8, 0);
+
+                        uart_tx_string("MCP_OFF=");
+                        utoa(pin, buffer, 10);
+                        uart_tx_string(buffer);
+                        uart_tx_string("\r\n");
+                    }
+                    else
+                    {
+                        uart_tx_string("ERR\r\n");
+                    }
                 }
                 else
                 {
