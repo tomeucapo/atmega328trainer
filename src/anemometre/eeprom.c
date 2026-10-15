@@ -35,6 +35,7 @@
 #define EEPROM_REC_MAX   ((EEPROM_SIZE - EEPROM_HDR_PAGE) / EEPROM_REC_SIZE)
 
 static uint8_t  eeprom_present = 0;
+static uint8_t  eeprom_wr_fail = 0;
 static uint8_t  hdr_slot = 0;
 static uint32_t rec_count = 0;
 
@@ -108,6 +109,17 @@ static void eeprom_read(uint16_t addr, uint8_t *buf, uint16_t len)
     twi_stop();
 }
 
+// Relee lo escrito y lo compara: detecta chips sin escribir en
+// el array (por ejemplo WP activo) donde el ACK si responde.
+static uint8_t eeprom_verify(uint16_t addr, const uint8_t *buf, uint8_t len)
+{
+    uint8_t tmp[EEPROM_REC_SIZE];
+
+    eeprom_read(addr, tmp, len);
+
+    return (uint8_t)(memcmp(tmp, buf, len) != 0);
+}
+
 static uint8_t eeprom_ack(uint8_t addr)
 {
     uint8_t nack;
@@ -173,9 +185,17 @@ void eeprom_init(void)
 
     if(!found)
     {
+        uint8_t check[8];
+
         hdr_slot = 0;
         rec_count = 0;
         eeprom_write_hdr(0, 0);
+
+        // El chip ACKa aunque no acepte la escritura (WP); se
+        // comprueba releyendo la cabecera recien grabada.
+        eeprom_read(0, check, 8);
+        if((uint16_t)(check[0] | (check[1] << 8)) != EEPROM_HDR_MAGIC)
+            eeprom_wr_fail = 1;
     }
 }
 
@@ -212,6 +232,14 @@ void eeprom_log(uint32_t uptime_s, float wind_kmh, float temp_c, uint32_t rain_t
     addr = (uint16_t)(EEPROM_HDR_PAGE + (uint32_t)slot * EEPROM_REC_SIZE);
 
     eeprom_write(addr, buf, EEPROM_REC_SIZE);
+
+    // Si la relectura no coincide, el registro no se ha guardado
+    // (WP activo o fallo de bus): no se cuenta ni avanza la cabecera.
+    if(eeprom_verify(addr, buf, EEPROM_REC_SIZE))
+    {
+        eeprom_wr_fail = 1;
+        return;
+    }
 
     rec_count++;
     hdr_slot = (uint8_t)((hdr_slot + 1) % EEPROM_HDR_SLOTS);
@@ -258,6 +286,12 @@ void eeprom_dump(void)
     {
         uart_tx_string("EEPROM ABSENT\r\n");
         return;
+    }
+
+    if(eeprom_wr_fail)
+    {
+        // El chip responde en el bus pero no conserva lo escrito.
+        uart_tx_string("EEPROM NO_ESCRITURA (revisar WP/GND)\r\n");
     }
 
     total = rec_count;
