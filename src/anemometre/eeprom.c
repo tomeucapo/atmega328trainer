@@ -5,12 +5,11 @@
 #include "eeprom.h"
 
 // ======================================================
-// EEPROM I2C 24AA515 (512 kbit / 64 KB)
+// EEPROM I2C 24AA512/24LC512 (512 kbit / 64 KB)
 //
-// El control byte es 1010 B0 A1 A0 R/W: con A1=A0 a GND, el
-// bloque bajo (0x0000-0x7FFF) responde en 0x50 y el alto
-// (0x8000-0xFFFF) en 0x54. La direccion de palabra es de 2
-// bytes (A14..A0) y la pagina de escritura de 64 B.
+// Con A2=VCC, A1=GND, A0=GND: control byte 1010 A2 A1 A0 R/W = 0xA8/0xA9
+// Direccion 7-bit = 0x54 (0xA8>>1). Direccion de palabra de 2 bytes (A15..A0).
+// Pagina de escritura de 128 bytes (típico 24AA512) - usamos 64 para compatibilidad.
 //
 // Mapa:
 //   pagina 0 (64 B)  cabecera, 8 copias de 8 B (wear-leveling)
@@ -24,7 +23,7 @@
 //   [12..15] reservado
 // ======================================================
 
-#define EEPROM_BASE_ADDR 0x50
+#define EEPROM_BASE_ADDR 0x58  // A2=1, A1=0, A0=0 (1010 A2 A1 A0)
 #define EEPROM_SIZE      65536UL
 
 #define EEPROM_HDR_PAGE  64
@@ -38,10 +37,12 @@ static uint8_t  eeprom_present = 0;
 static uint8_t  eeprom_wr_fail = 0;
 static uint8_t  hdr_slot = 0;
 static uint32_t rec_count = 0;
+static uint8_t  eeprom_slave_addr = EEPROM_BASE_ADDR;
 
 static uint8_t eeprom_slave(uint16_t addr)
 {
-    return (uint8_t)(EEPROM_BASE_ADDR | ((addr & 0x8000) ? 0x04 : 0x00));
+    (void)addr;
+    return eeprom_slave_addr;
 }
 
 // El chip no responde durante los hasta 5 ms de programacion;
@@ -152,7 +153,14 @@ void eeprom_init(void)
     uint8_t buf[8];
     uint8_t found = 0;
 
-    eeprom_present = eeprom_ack(EEPROM_BASE_ADDR);
+    eeprom_slave_addr = EEPROM_BASE_ADDR;
+    eeprom_present = eeprom_ack(eeprom_slave_addr);
+
+    if(!eeprom_present)
+    {
+        eeprom_slave_addr = 0x50;
+        eeprom_present = eeprom_ack(eeprom_slave_addr);
+    }
 
     if(!eeprom_present)
         return;
