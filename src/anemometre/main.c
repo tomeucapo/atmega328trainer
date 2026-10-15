@@ -218,6 +218,27 @@ static uint8_t parse_mcp_pin(const char *s, uint8_t *pin)
 // OLED SSD1306
 // ======================================================
 
+void print_run_time(uint32_t seconds)
+{
+    char line[24]={0};
+
+    char hours[2]={0};
+    ultoa((seconds/60/60)%24, hours, 10);
+    strcat(line, hours);
+    strcat(line, ":");
+    
+    char minutes[2]={0};
+    ultoa((seconds/60)%60, minutes, 10);
+    strcat(line, minutes);
+    strcat(line, ":");
+    
+    char seconds_str[2]={0};
+    ultoa(seconds%60, seconds_str, 10);
+    strcat(line, seconds_str);
+
+    ssd1306_draw_string(7, 1, line);
+}
+
 void update_oled(void)
 {
     char line[24];
@@ -247,11 +268,7 @@ void update_oled(void)
         ssd1306_draw_string_centered(5, line);
     }
 
-    // Uptime (segun) en la ultima fila
-    ultoa(sched_get_tick() / 1000, line, 10);
-    strcat(line, " s");
-    ssd1306_draw_string(7, 1, line);
-
+    print_run_time(sched_get_tick() / 1000);
     ssd1306_update();
 }
 

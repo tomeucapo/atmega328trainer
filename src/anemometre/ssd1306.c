@@ -159,6 +159,10 @@ void ssd1306_init(void)
         ssd1306_cmd(init_seq[i]);
 
     ssd1306_clear();
+
+    for(uint8_t page = 0; page < SSD1306_PAGES; page++)
+        ssd1306_checksum[page] = 0xFFFF;
+        
     ssd1306_update();
 }
 
