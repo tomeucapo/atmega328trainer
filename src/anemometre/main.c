@@ -13,6 +13,7 @@
 #include "ssd1306.h"
 #include "scheduler.h"
 #include "uart.h"
+#include "eeprom.h"
 
 // ======================================================
 // CONFIG
@@ -220,7 +221,7 @@ static uint8_t parse_mcp_pin(const char *s, uint8_t *pin)
 
 void update_oled(void)
 {
-    char line[24];
+    char line[24] = {0};
 
     ssd1306_clear();
 
@@ -272,6 +273,19 @@ static void task_sensors(void)
 {
     if(!uart_rx_available())
         current_temp = ds18b20_get_temp();
+}
+
+// Log: guarda una lectura periodica en la EEPROM I2C. La
+// escritura bloquea ~5 ms mientras el chip se programa.
+static void task_log(void)
+{
+    uint32_t rain;
+
+    cli();
+    rain = rain_count;
+    sei();
+
+    eeprom_log(sched_get_tick() / 1000, velocidad, current_temp, rain);
 }
 
 // OLED: envio del framebuffer por I2C; se omite si hay bytes
@@ -365,6 +379,10 @@ static void task_serial(void)
 
                 uart_tx_string("RAIN RESET OK\r\n");
             }
+            else if(strcmp(rx_buffer,"@DUMP") == 0)
+            {
+                eeprom_dump();
+            }
             else if(strncmp(rx_buffer,"@MCP_ON",7) == 0)
             {
                 uint8_t pin;
@@ -420,10 +438,11 @@ static void task_serial(void)
 // de task_sensors evita que su lectura bloqueante coincida con el
 // refresco de la pantalla.
 sched_task_t task_list[] = {
-    { task_anemo,    50,    0 },
-    { task_serial,    5,    0 },
-    { task_display, 500,    0 },
-    { task_sensors, 2000,  100 },
+    { task_anemo,    50,      0 },
+    { task_serial,    5,      0 },
+    { task_display, 500,      0 },
+    { task_sensors, 2000,   100 },
+    { task_log,    60000,  3000 },
 };
 
 // ======================================================
@@ -446,6 +465,9 @@ int main(void)
 
     // OLED SSD1306 en el mismo bus I2C
     ssd1306_init();
+
+    // EEPROM 24AA515 en el mismo bus I2C
+    eeprom_init();
 
     sei();
 
