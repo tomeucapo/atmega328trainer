@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <util/delay.h>
 #include "ds18b20.h"
 #include "mcp23017.h"
 #include "ssd1306.h"
@@ -485,6 +486,37 @@ int main(void)
 
     // EEPROM 24AA515 en el mismo bus I2C
     eeprom_init();
+
+    // Pantalla de bienvenida con efecto scroll vertical
+    {
+        const char *line1 = "Weather Station 1.0";
+        const char *line2 = "by TCC 2006(C)";
+        uint8_t i;
+
+        for(i = 0; i <= SSD1306_PAGES; i++)
+        {
+            ssd1306_clear();
+            if(i < SSD1306_PAGES)
+                ssd1306_draw_string_centered(i, line1);
+            if(i > 0)
+                ssd1306_draw_string_centered(i - 1, line2);
+            ssd1306_update();
+            _delay_ms(120);
+        }
+
+        _delay_ms(2000);
+
+        for(i = SSD1306_PAGES; i > 0; i--)
+        {
+            ssd1306_clear();
+            if(i <= SSD1306_PAGES)
+                ssd1306_draw_string_centered(i - 1, line1);
+            if(i < SSD1306_PAGES)
+                ssd1306_draw_string_centered(i, line2);
+            ssd1306_update();
+            _delay_ms(120);
+        }
+    }
 
     sei();
 
