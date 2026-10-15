@@ -1,5 +1,6 @@
 #include "scheduler.h"
 #include <stddef.h>
+#include <util/atomic.h>
 
 // ======================================================
 // SCHEDULER COOPERATIVO
@@ -21,7 +22,16 @@ void sched_tick(void)
 
 uint32_t sched_get_tick(void)
 {
-    return tick_count;
+    uint32_t now;
+
+    // tick_count es de 32 bits y la ISR lo incrementa: una lectura
+    // normal puede partirse entre bytes y dar un valor corrupto.
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+    {
+        now = tick_count;
+    }
+
+    return now;
 }
 
 void sched_init(sched_task_t *task_list, uint8_t count)

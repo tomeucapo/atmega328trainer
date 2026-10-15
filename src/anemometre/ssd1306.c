@@ -160,9 +160,12 @@ void ssd1306_init(void)
 
     ssd1306_clear();
 
-    for(uint8_t page = 0; page < SSD1306_PAGES; page++)
-        ssd1306_checksum[page] = 0xFFFF;
-        
+    // Invalida los checksums para forzar el primer envio completo:
+    // la GDDRAM del SSD1306 arranca indefinida, y sin esto las
+    // paginas que nunca se pintan se quedan con basura.
+    for(uint8_t i = 0; i < SSD1306_PAGES; i++)
+        ssd1306_checksum[i] = 0xFFFF;
+
     ssd1306_update();
 }
 
