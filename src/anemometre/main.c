@@ -8,15 +8,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <util/delay.h>
 #include "ds18b20.h"
 #include "mcp23017.h"
+#include "ssd1306.h"
+#include "scheduler.h"
+#include "uart.h"
+#include "eeprom.h"
 
 // ======================================================
 // CONFIG
 // ======================================================
-
-#define BAUD 9600
-#define UBRR_VALUE ((F_CPU/16/BAUD)-1)
 
 #define FACTOR_KMH 3.2f
 #define MIN_PERIOD 100
@@ -35,6 +37,7 @@ volatile uint8_t new_data = 0;
 volatile uint8_t overflow_counter = 0;
 
 float velocidad = 0;
+float current_temp = DS18B20_ERROR_TEMP;
 
 // ======================================================
 // PLUVIOMETRO
@@ -42,42 +45,6 @@ float velocidad = 0;
 
 volatile uint32_t rain_count = 0;
 volatile uint32_t rain_last_pulse = 0;
-
-// ======================================================
-// TIMER MILLISECONDS
-// ======================================================
-
-volatile uint32_t millis_counter = 0;
-
-// ======================================================
-// UART
-// ======================================================
-
-void uart_init(void)
-{
-    UBRR0H = (UBRR_VALUE >> 8);
-    UBRR0L = UBRR_VALUE;
-
-    UCSR0B = (1<<RXEN0) | (1<<TXEN0);
-    UCSR0C = (1<<UCSZ01) | (1<<UCSZ00);
-}
-
-void uart_tx_char(char c)
-{
-    while(!(UCSR0A & (1<<UDRE0)));
-    UDR0 = c;
-}
-
-void uart_tx_string(const char* s)
-{
-    while(*s)
-        uart_tx_char(*s++);
-}
-
-uint8_t uart_rx_available(void)
-{
-    return (UCSR0A & (1<<RXC0));
-}
 
 // ======================================================
 // TIMER1 INPUT CAPTURE (ANEMOMETRO)
@@ -137,10 +104,10 @@ void timer0_init(void)
 }
 
 ISR(TIMER0_COMPA_vect)
-{  
+{
     static uint16_t blink_counter = 0;
 
-    millis_counter++;
+    sched_tick();
 
     if(++blink_counter >= 500)
     {
@@ -173,7 +140,7 @@ ISR(PCINT0_vect)
 
     if(!old_state && new_state)
     {
-        uint32_t now = millis_counter;
+        uint32_t now = sched_get_tick();
 
         if((now - rain_last_pulse) > RAIN_DEBOUNCE_MS)
         {
@@ -250,6 +217,285 @@ static uint8_t parse_mcp_pin(const char *s, uint8_t *pin)
 }
 
 // ======================================================
+// OLED SSD1306
+// ======================================================
+
+void print_time(uint32_t seconds)
+{
+    char line[24]={0};
+
+    char hours[2]={0};
+    ultoa((seconds/60/60)%24, hours, 10);
+    strcat(line, hours);
+    strcat(line, ":");
+    
+    char minutes[2]={0};
+    ultoa((seconds/60)%60, minutes, 10);
+    strcat(line, minutes);
+    strcat(line, ":");
+    
+    char seconds_str[2]={0};
+    ultoa(seconds%60, seconds_str, 10);
+    strcat(line, seconds_str);
+
+    ssd1306_draw_string(7, 1, line);
+}
+
+void update_oled(void)
+{
+    char line[24] = {0};
+
+    ssd1306_clear();
+
+    ssd1306_draw_string_centered(0, "ANEMOMETRO");
+
+    dtostrf(velocidad, 5, 1, line);
+    strcat(line, " km/h");
+    ssd1306_draw_string_centered(1, line);
+
+    ssd1306_draw_string_centered(2, "LLUVIA");
+
+    dtostrf(rain_count * RAIN_MM_PER_TIP, 4, 2, line);
+    strcat(line, " mm");
+    ssd1306_draw_string_centered(3, line);
+
+    ssd1306_draw_string_centered(4, "TEMP");
+
+    if(current_temp == DS18B20_ERROR_TEMP)
+        ssd1306_draw_string_centered(5, "--.- C");
+    else
+    {
+        dtostrf(current_temp, 4, 1, line);
+        strcat(line, " C");
+        ssd1306_draw_string_centered(5, line);
+    }
+
+    print_time(sched_get_tick() / 1000);
+    ssd1306_update();
+}
+
+// ======================================================
+// TAREAS DEL SCHEDULER
+// ======================================================
+
+// Anemometro: recalcula la velocidad desde la ISR de ICP1
+// (muy rapido, por eso periodo corto).
+static void task_anemo(void)
+{
+    calculate_anemo_velocity();
+}
+
+// Sensores: la lectura del DS18B20 bloquea ~100 ms; se evita
+// si hay bytes de UART pendientes.
+static void task_sensors(void)
+{
+    if(!uart_rx_available())
+        current_temp = ds18b20_get_temp();
+}
+
+// Log: guarda una lectura periodica en la EEPROM I2C. La
+// escritura bloquea ~5 ms mientras el chip se programa.
+static void task_log(void)
+{
+    uint32_t rain;
+
+    cli();
+    rain = rain_count;
+    sei();
+
+    eeprom_log(sched_get_tick() / 1000, velocidad, current_temp, rain);
+}
+
+// OLED: envio del framebuffer por I2C; se omite si hay bytes
+// de UART pendientes para no robarles tiempo al puerto serie.
+static void task_display(void)
+{
+    if(uart_rx_available())
+        return;
+
+    update_oled();
+}
+
+// UART: procesa los comandos serie terminados en CR/LF.
+static void task_serial(void)
+{
+    static char buffer[32];
+    static char rx_buffer[32];
+    static uint8_t rx_index = 0;
+
+    while(uart_rx_available())
+    {
+        char c = uart_rx_read();
+
+        uart_tx_char(c);
+
+        if(c == '\r' || c == '\n')
+        {
+            rx_buffer[rx_index] = 0;
+            rx_index = 0;
+
+            if(strcmp(rx_buffer,"@STAT_ANEMO") == 0)
+            {
+                dtostrf(velocidad,6,3,buffer);
+
+                uart_tx_string("ANEMO=");
+                uart_tx_string(buffer);
+                uart_tx_string(" km/h\r\n");
+            }
+            else if(strcmp(rx_buffer,"@STAT_RAIN") == 0)
+            {
+                uint32_t count;
+                float mm;
+
+                cli();
+                count = rain_count;
+                sei();
+                mm = count * RAIN_MM_PER_TIP;
+
+                uart_tx_string("RAIN_COUNT=");
+
+                ultoa(count,buffer,10);
+                uart_tx_string(buffer);
+
+                uart_tx_string("\r\n");
+
+                uart_tx_string("RAIN_MM=");
+
+                dtostrf(mm,6,2,buffer);
+                uart_tx_string(buffer);
+
+                uart_tx_string("\r\n");
+
+                uart_tx_string("RAIN_LM2=");
+
+                dtostrf(mm,6,2,buffer);
+                uart_tx_string(buffer);
+
+                uart_tx_string("\r\n");
+            }
+            else if(strcmp(rx_buffer,"@STAT_TEMP") == 0)
+            {
+                float temp = ds18b20_get_temp();
+
+                if(temp == DS18B20_ERROR_TEMP)
+                {
+                    uart_tx_string("TEMP_ERR\r\n");
+                }
+                else
+                {
+                    uart_tx_string("TEMP=");
+                    dtostrf(temp,6,3,buffer);
+                    uart_tx_string(buffer);
+                    uart_tx_string(" C\r\n");
+                }
+            }
+            else if(strcmp(rx_buffer,"@RESET_RAIN") == 0)
+            {
+                cli();
+                rain_count = 0;
+                sei();
+
+                uart_tx_string("RAIN RESET OK\r\n");
+            }
+            else if(strcmp(rx_buffer,"@DUMP") == 0)
+            {
+                eeprom_dump();
+            }
+            else if(strncmp(rx_buffer,"@MCP_ON",7) == 0)
+            {
+                uint8_t pin;
+
+                if(parse_mcp_pin(rx_buffer + 7, &pin))
+                {
+                    mcp23017_write_pin(pin / 8, pin % 8, 1);
+
+                    uart_tx_string("MCP_ON=");
+                    utoa(pin, buffer, 10);
+                    uart_tx_string(buffer);
+                    uart_tx_string("\r\n");
+                }
+                else
+                {
+                    uart_tx_string("ERR\r\n");
+                }
+            }
+            else if(strncmp(rx_buffer,"@MCP_OFF",8) == 0)
+            {
+                uint8_t pin;
+
+                if(parse_mcp_pin(rx_buffer + 8, &pin))
+                {
+                    mcp23017_write_pin(pin / 8, pin % 8, 0);
+
+                    uart_tx_string("MCP_OFF=");
+                    utoa(pin, buffer, 10);
+                    uart_tx_string(buffer);
+                    uart_tx_string("\r\n");
+                }
+                else
+                {
+                    uart_tx_string("ERR\r\n");
+                }
+            }
+            else
+            {
+                uart_tx_string("ERR\r\n");
+            }
+        }
+        else
+        {
+            if(rx_index < sizeof(rx_buffer)-1)
+            {
+                rx_buffer[rx_index++] = c;
+            }
+        }
+    }
+}
+
+// Tabla de tareas: { funcion, periodo_ms, desfase_ms }. El desfase
+// de task_sensors evita que su lectura bloqueante coincida con el
+// refresco de la pantalla.
+sched_task_t task_list[] = {
+    { task_anemo,    50,      0 },
+    { task_serial,    5,      0 },
+    { task_display, 500,      0 },
+    { task_sensors, 2000,   100 },
+    { task_log,    60000,  3000 },
+};
+
+void welcome(void)
+{
+        const char *line1 = "Weather Station 1.0";
+        const char *line2 = "TCC 2026(C)";
+        uint8_t i;
+
+        for(i = 0; i <= SSD1306_PAGES; i++)
+        {
+            ssd1306_clear();
+            if(i < SSD1306_PAGES)
+                ssd1306_draw_string_centered(i, line1);
+            if(i > 0)
+                ssd1306_draw_string_centered(i - 1, line2);
+            ssd1306_update();
+            _delay_ms(120);
+        }
+
+        _delay_ms(2000);
+
+        for(i = SSD1306_PAGES; i > 0; i--)
+        {
+            ssd1306_clear();
+            if(i <= SSD1306_PAGES)
+                ssd1306_draw_string_centered(i - 1, line1);
+            if(i < SSD1306_PAGES)
+                ssd1306_draw_string_centered(i, line2);
+            ssd1306_update();
+            _delay_ms(120);
+        }
+}
+
+
+// ======================================================
 // MAIN
 // ======================================================
 
@@ -267,150 +513,22 @@ int main(void)
     mcp23017_direction(MCP23017_PORTA, 0x00); // reles: salidas
     mcp23017_direction(MCP23017_PORTB, 0x00); // LEDs: salidas
 
+    // OLED SSD1306 en el mismo bus I2C
+    ssd1306_init();
+
+    // EEPROM 24AA515 en el mismo bus I2C
+    eeprom_init();
+
+    welcome();
+
     sei();
 
-
-    char buffer[32];
-    char rx_buffer[32];
-    uint8_t rx_index = 0;
+    sched_init(task_list, (uint8_t)(sizeof(task_list) / sizeof(task_list[0])));
 
     uart_tx_string("*** ATMEGA328P WEATHER 1.0\r\n");
 
-
     while(1)
     {
-        // ====================================
-        // ANEMOMETRO
-        // ====================================
-
-        calculate_anemo_velocity();
-
-        // ====================================
-        // SERIAL COMMANDS
-        // ====================================
-
-        while(uart_rx_available())
-        {
-            char c = UDR0;
-
-			uart_tx_char(c);
-
-            if(c == '\r' || c == '\n')
-            {
-                rx_buffer[rx_index] = 0;
-                rx_index = 0;
-
-                if(strcmp(rx_buffer,"@STAT_ANEMO") == 0)
-                {
-                    dtostrf(velocidad,6,3,buffer);
-
-                    uart_tx_string("ANEMO=");
-                    uart_tx_string(buffer);
-                    uart_tx_string(" km/h\r\n");
-                }
-                else if(strcmp(rx_buffer,"@STAT_RAIN") == 0)
-                {
-                    uint32_t count;
-                    float mm;
-
-                    cli();
-                    count = rain_count;
-                    sei();
-                    mm = count * RAIN_MM_PER_TIP;
-
-                    uart_tx_string("RAIN_COUNT=");
-
-                    ultoa(count,buffer,10);
-                    uart_tx_string(buffer);
-
-                    uart_tx_string("\r\n");
-
-                    uart_tx_string("RAIN_MM=");
-
-                    dtostrf(mm,6,2,buffer);
-                    uart_tx_string(buffer);
-
-                    uart_tx_string("\r\n");
-
-                    uart_tx_string("RAIN_LM2=");
-
-                    dtostrf(mm,6,2,buffer);
-                    uart_tx_string(buffer);
-
-                    uart_tx_string("\r\n");
-                }
-                else if(strcmp(rx_buffer,"@STAT_TEMP") == 0)
-                {
-                    float temp = ds18b20_get_temp();
-
-                    if(temp == DS18B20_ERROR_TEMP)
-                    {
-                        uart_tx_string("TEMP_ERR\r\n");
-                    }
-                    else
-                    {
-                        uart_tx_string("TEMP=");
-                        dtostrf(temp,6,3,buffer);
-                        uart_tx_string(buffer);
-                        uart_tx_string(" C\r\n");
-                    }
-                }
-                else if(strcmp(rx_buffer,"@RESET_RAIN") == 0)
-                {
-                    cli();
-                    rain_count = 0;
-                    sei();
-
-                    uart_tx_string("RAIN RESET OK\r\n");
-                }
-                else if(strncmp(rx_buffer,"@MCP_ON",7) == 0)
-                {
-                    uint8_t pin;
-
-                    if(parse_mcp_pin(rx_buffer + 7, &pin))
-                    {
-                        mcp23017_write_pin(pin / 8, pin % 8, 1);
-
-                        uart_tx_string("MCP_ON=");
-                        utoa(pin, buffer, 10);
-                        uart_tx_string(buffer);
-                        uart_tx_string("\r\n");
-                    }
-                    else
-                    {
-                        uart_tx_string("ERR\r\n");
-                    }
-                }
-                else if(strncmp(rx_buffer,"@MCP_OFF",8) == 0)
-                {
-                    uint8_t pin;
-
-                    if(parse_mcp_pin(rx_buffer + 8, &pin))
-                    {
-                        mcp23017_write_pin(pin / 8, pin % 8, 0);
-
-                        uart_tx_string("MCP_OFF=");
-                        utoa(pin, buffer, 10);
-                        uart_tx_string(buffer);
-                        uart_tx_string("\r\n");
-                    }
-                    else
-                    {
-                        uart_tx_string("ERR\r\n");
-                    }
-                }
-                else
-                {
-                    uart_tx_string("ERR\r\n");
-                }
-            }
-            else
-            {
-                if(rx_index < sizeof(rx_buffer)-1)
-                {
-                    rx_buffer[rx_index++] = c;
-                }
-            }
-        }
+        sched_manage();
     }
 }

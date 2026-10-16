@@ -38,9 +38,18 @@ uint8_t twi_restart(void)
 
 uint8_t twi_write_byte(uint8_t data)
 {
+    uint8_t status;
+
     TWDR = data;
     TWCR = (1<<TWINT) | (1<<TWEN);
-    return (twi_wait_twint() == TWI_MT_DATA_ACK) ? 0 : 1;
+    status = twi_wait_twint();
+
+    // El primer byte tras START/RESTART es SLA+R/W y ACKa con
+    // MT_SLA_ACK (0x18); los bytes de datos ACKan con MT_DATA_ACK
+    // (0x28) y la lectura con MR_SLA_ACK (0x40).
+    return (status == TWI_MT_SLA_ACK
+         || status == TWI_MT_DATA_ACK
+         || status == TWI_MR_SLA_ACK) ? 0 : 1;
 }
 
 uint8_t twi_read_ack(uint8_t *data)
@@ -67,5 +76,11 @@ uint8_t twi_read_nack(uint8_t *data)
 
 void twi_stop(void)
 {
+    uint16_t guard = 0;
+
     TWCR = (1<<TWINT) | (1<<TWSTO) | (1<<TWEN);
+
+    // Espera a que el hardware complete la condicion STOP; si no,
+    // un START inmediatamente posterior puede perderse.
+    while((TWCR & (1<<TWSTO)) && ++guard < 10000);
 }
