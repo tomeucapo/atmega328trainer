@@ -1,6 +1,8 @@
 #include "uart.h"
 #include <avr/io.h>
 #include <avr/interrupt.h>
+#include <stdlib.h>
+#include <string.h>
 
 #ifndef F_CPU
 #define F_CPU 8000000UL
