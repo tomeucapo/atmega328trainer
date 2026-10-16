@@ -76,5 +76,11 @@ uint8_t twi_read_nack(uint8_t *data)
 
 void twi_stop(void)
 {
+    uint16_t guard = 0;
+
     TWCR = (1<<TWINT) | (1<<TWSTO) | (1<<TWEN);
+
+    // Espera a que el hardware complete la condicion STOP; si no,
+    // un START inmediatamente posterior puede perderse.
+    while((TWCR & (1<<TWSTO)) && ++guard < 10000);
 }

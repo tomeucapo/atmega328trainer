@@ -34,6 +34,10 @@
 #define EEPROM_REC_SIZE  16
 #define EEPROM_REC_MAX   ((EEPROM_SIZE - EEPROM_HDR_PAGE) / EEPROM_REC_SIZE)
 
+// Diagnostico por UART durante la inicializacion. Ponlo a 0 cuando
+// ya no lo necesites.
+#define EEPROM_DEBUG 1
+
 static uint8_t  eeprom_present = 0;
 static uint8_t  eeprom_wr_fail = 0;
 static uint8_t  hdr_slot = 0;
@@ -149,6 +153,22 @@ static void eeprom_write_hdr(uint8_t slot, uint32_t count)
     eeprom_write((uint16_t)(slot * 8), buf, 8);
 }
 
+#if EEPROM_DEBUG
+static void eeprom_tx_hex(const uint8_t *b, uint8_t n)
+{
+    static const char hex[] = "0123456789ABCDEF";
+
+    for(uint8_t i = 0; i < n; i++)
+    {
+        uart_tx_char(hex[b[i] >> 4]);
+        uart_tx_char(hex[b[i] & 0x0F]);
+        uart_tx_char(' ');
+    }
+
+    uart_tx_string("\r\n");
+}
+#endif
+
 void eeprom_init(void)
 {
     uint8_t buf[8];
@@ -156,7 +176,6 @@ void eeprom_init(void)
 
     eeprom_slave_addr = EEPROM_BASE_ADDR;
     eeprom_present = eeprom_ack(eeprom_slave_addr);
-
     // Si no responde en la direccion esperada, prueba las 8
     // combinaciones de A2..A0 (0x50-0x57) por si cambia el cableado.
     if(!eeprom_present)
@@ -174,6 +193,16 @@ void eeprom_init(void)
 
     if(!eeprom_present)
         return;
+
+#if EEPROM_DEBUG
+    uart_tx_string("EEPROM addr=0x");
+    {
+        static const char hex[] = "0123456789ABCDEF";
+        uart_tx_char(hex[eeprom_slave_addr >> 4]);
+        uart_tx_char(hex[eeprom_slave_addr & 0x0F]);
+    }
+    uart_tx_string("\r\n");
+#endif
 
     for(uint8_t i = 0; i < EEPROM_HDR_SLOTS; i++)
     {
@@ -213,7 +242,14 @@ void eeprom_init(void)
         // comprueba releyendo la cabecera recien grabada.
         eeprom_read(0, check, 8);
         if((uint16_t)(check[0] | (check[1] << 8)) != EEPROM_HDR_MAGIC)
+        {
             eeprom_wr_fail = 1;
+
+#if EEPROM_DEBUG
+            uart_tx_string("EEPROM hdr read: ");
+            eeprom_tx_hex(check, 8);
+#endif
+        }
     }
 }
 
