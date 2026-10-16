@@ -300,34 +300,6 @@ void eeprom_log(uint32_t uptime_s, float wind_kmh, float temp_c, uint32_t rain_t
     eeprom_write_hdr(hdr_slot, rec_count);
 }
 
-static void eeprom_tx_u32(uint32_t v)
-{
-    char tmp[11];
-
-    ultoa(v, tmp, 10);
-    uart_tx_string(tmp);
-}
-
-// Imprime un valor con un decimal (v = valor * 10).
-static void eeprom_tx_x10(int16_t v)
-{
-    char tmp[8];
-    uint16_t u;
-
-    if(v < 0)
-    {
-        uart_tx_char('-');
-        u = (uint16_t)(-v);
-    }
-    else
-        u = (uint16_t)v;
-
-    itoa(u / 10, tmp, 10);
-    uart_tx_string(tmp);
-    uart_tx_char('.');
-    itoa(u % 10, tmp, 10);
-    uart_tx_string(tmp);
-}
 
 void eeprom_dump(void)
 {
@@ -383,13 +355,17 @@ void eeprom_dump(void)
              | ((uint32_t)buf[11] << 24);
 
         uart_tx_string("LOG ");
-        eeprom_tx_u32(uptime);
+        //eeprom_tx_u32(uptime);
+	uart_tx_time(uptime);
         uart_tx_char(' ');
-        eeprom_tx_x10((int16_t)wind_x10);
+        //eeprom_tx_x10((int16_t)wind_x10);
+	uart_tx_decimal((int16_t)wind_x10);
         uart_tx_char(' ');
-        eeprom_tx_x10(temp_x10);
+        //eeprom_tx_x10(temp_x10);
+	uart_tx_decimal(temp_x10);
         uart_tx_char(' ');
-        eeprom_tx_u32(rain);
+        //eeprom_tx_u32(rain);
+	uart_tx_uint32(rain);
         uart_tx_string("\r\n");
     }
 

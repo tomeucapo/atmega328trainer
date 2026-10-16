@@ -68,3 +68,54 @@ uint8_t uart_rx_read(void)
     rx_tail = (rx_tail + 1) & (UART_RX_BUF_SIZE - 1);
     return c;
 }
+
+void uart_tx_decimal(int16_t v)
+{
+    char tmp[8];
+    uint16_t u;
+
+    if(v < 0)
+    {
+        uart_tx_char('-');
+        u = (uint16_t)(-v);
+    }
+    else
+        u = (uint16_t)v;
+
+    itoa(u / 10, tmp, 10);
+    uart_tx_string(tmp);
+    uart_tx_char('.');
+    itoa(u % 10, tmp, 10);
+    uart_tx_string(tmp);
+}
+
+void uart_tx_uint32(uint32_t v)
+{
+    char tmp[11];
+
+    ultoa(v, tmp, 10);
+    uart_tx_string(tmp);
+}
+
+void uart_tx_time(uint32_t seconds)
+{
+    char line[8]={0};
+
+    char hours[2]={0};
+    ultoa((seconds/60/60)%24, hours, 10);
+    strcat(line, hours);
+    strcat(line, ":");
+    
+    char minutes[2]={0};
+    ultoa((seconds/60)%60, minutes, 10);
+    strcat(line, minutes);
+    strcat(line, ":");
+    
+    char seconds_str[2]={0};
+    ultoa(seconds%60, seconds_str, 10);
+    strcat(line, seconds_str);
+
+    uart_tx_string(line);
+}
+
+

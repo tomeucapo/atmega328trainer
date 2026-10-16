@@ -220,7 +220,7 @@ static uint8_t parse_mcp_pin(const char *s, uint8_t *pin)
 // OLED SSD1306
 // ======================================================
 
-void print_run_time(uint32_t seconds)
+void print_time(uint32_t seconds)
 {
     char line[24]={0};
 
@@ -270,7 +270,7 @@ void update_oled(void)
         ssd1306_draw_string_centered(5, line);
     }
 
-    print_run_time(sched_get_tick() / 1000);
+    print_time(sched_get_tick() / 1000);
     ssd1306_update();
 }
 
@@ -463,34 +463,10 @@ sched_task_t task_list[] = {
     { task_log,    60000,  3000 },
 };
 
-// ======================================================
-// MAIN
-// ======================================================
-
-int main(void)
+void welcome(void)
 {
-    io_init();
-    uart_init();
-    timer1_init();
-    timer0_init();
-    rain_init();
-    ds18b20_init();
-
-    // MCP23017 (PC4=SDA, PC5=SCL)
-    mcp23017_init();
-    mcp23017_direction(MCP23017_PORTA, 0x00); // reles: salidas
-    mcp23017_direction(MCP23017_PORTB, 0x00); // LEDs: salidas
-
-    // OLED SSD1306 en el mismo bus I2C
-    ssd1306_init();
-
-    // EEPROM 24AA515 en el mismo bus I2C
-    eeprom_init();
-
-    // Pantalla de bienvenida con efecto scroll vertical
-    {
         const char *line1 = "Weather Station 1.0";
-        const char *line2 = "by TCC 2006(C)";
+        const char *line2 = "TCC 2026(C)";
         uint8_t i;
 
         for(i = 0; i <= SSD1306_PAGES; i++)
@@ -516,7 +492,34 @@ int main(void)
             ssd1306_update();
             _delay_ms(120);
         }
-    }
+}
+
+
+// ======================================================
+// MAIN
+// ======================================================
+
+int main(void)
+{
+    io_init();
+    uart_init();
+    timer1_init();
+    timer0_init();
+    rain_init();
+    ds18b20_init();
+
+    // MCP23017 (PC4=SDA, PC5=SCL)
+    mcp23017_init();
+    mcp23017_direction(MCP23017_PORTA, 0x00); // reles: salidas
+    mcp23017_direction(MCP23017_PORTB, 0x00); // LEDs: salidas
+
+    // OLED SSD1306 en el mismo bus I2C
+    ssd1306_init();
+
+    // EEPROM 24AA515 en el mismo bus I2C
+    eeprom_init();
+
+    welcome();
 
     sei();
 

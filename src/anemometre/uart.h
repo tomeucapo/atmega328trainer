@@ -16,4 +16,8 @@ uint8_t uart_rx_available(void);
 // Devuelve y consume el siguiente byte del buffer RX.
 uint8_t uart_rx_read(void);
 
+void uart_tx_decimal(int16_t v);
+void uart_tx_uint32(uint32_t v);
+void uart_tx_time(uint32_t seconds);
+
 #endif
