@@ -8,7 +8,7 @@ set(F_CPU 8000000UL)
 # Toolchain AVR (debe ir antes de project())
 # ==============================
 
-set(CMAKE_SYSTEM_NAME Generic)
+set(CMAKE_SYSTEM_NAME AVRWeatherStation)
 set(CMAKE_SYSTEM_PROCESSOR avr)
 
 set(CMAKE_C_COMPILER avr-gcc)
@@ -45,7 +45,7 @@ add_link_options(
 # ==============================
 
 file(GLOB SRC_FILES
-    anemometre/*.c
+    weatherstation/*.c
 )
 
 add_executable(${TARGET}.elf ${SRC_FILES})
