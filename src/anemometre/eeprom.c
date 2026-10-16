@@ -5,17 +5,18 @@
 #include "eeprom.h"
 
 // ======================================================
-// EEPROM I2C 24AA512/24LC512 (512 kbit / 64 KB)
+// EEPROM I2C 24LC64 (64 kbit / 8 KB)
 //
-// Con A2=VCC, A1=GND, A0=GND: control byte 1010 A2 A1 A0 R/W = 0xA8/0xA9
-// Direccion 7-bit = 0x54 (0xA8>>1). Direccion de palabra de 2 bytes (A15..A0).
-// Pagina de escritura de 128 bytes (típico 24AA512) - usamos 64 para compatibilidad.
+// El control byte es 1010 A2 A1 A0 R/W: con A2=VCC, A1=A0=GND
+// responde en 0x54 (0x50 + bit A2 = 4). La direccion de palabra
+// es de 2 bytes (A12..A0, los bits altos no importan) y la pagina
+// de escritura de 32 B.
 //
 // Mapa:
 //   pagina 0 (64 B)  cabecera, 8 copias de 8 B (wear-leveling)
 //   offset 64..      registros de 16 B en buffer circular
 //
-// Registro (16 B, nunca cruza pagina de 64 B):
+// Registro (16 B, nunca cruza pagina de 32 B):
 //   [0..3]  uptime en segundos        (uint32 LE)
 //   [4..5]  velocidad * 10 (km/h)     (uint16 LE)
 //   [6..7]  temperatura * 10 (C)      (int16  LE)
@@ -23,8 +24,8 @@
 //   [12..15] reservado
 // ======================================================
 
-#define EEPROM_BASE_ADDR 0x58  // A2=1, A1=0, A0=0 (1010 A2 A1 A0)
-#define EEPROM_SIZE      65536UL
+#define EEPROM_BASE_ADDR 0x54  // A2=1, A1=0, A0=0 (1010 A2 A1 A0)
+#define EEPROM_SIZE      8192UL
 
 #define EEPROM_HDR_PAGE  64
 #define EEPROM_HDR_SLOTS 8
@@ -156,10 +157,19 @@ void eeprom_init(void)
     eeprom_slave_addr = EEPROM_BASE_ADDR;
     eeprom_present = eeprom_ack(eeprom_slave_addr);
 
+    // Si no responde en la direccion esperada, prueba las 8
+    // combinaciones de A2..A0 (0x50-0x57) por si cambia el cableado.
     if(!eeprom_present)
     {
-        eeprom_slave_addr = 0x50;
-        eeprom_present = eeprom_ack(eeprom_slave_addr);
+        for(uint8_t a = 0x50; a <= 0x57; a++)
+        {
+            if(eeprom_ack(a))
+            {
+                eeprom_slave_addr = a;
+                eeprom_present = 1;
+                break;
+            }
+        }
     }
 
     if(!eeprom_present)
