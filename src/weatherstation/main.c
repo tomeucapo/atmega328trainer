@@ -15,6 +15,7 @@
 #include "scheduler.h"
 #include "uart.h"
 #include "eeprom.h"
+#include "twi.h"
 
 // ======================================================
 // CONFIG
@@ -507,6 +508,12 @@ int main(void)
     timer0_init();
     rain_init();
     ds18b20_init();
+
+    // Los esclavos I2C pueden arrancar despues que el MCU (o dejar
+    // el bus en bajo al cortar la alimentacion): libera el bus y da
+    // tiempo a que la OLED/EEPROM/MCP estabilicen su alimentacion.
+    twi_bus_recover();
+    _delay_ms(150);
 
     // MCP23017 (PC4=SDA, PC5=SCL)
     mcp23017_init();

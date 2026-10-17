@@ -327,7 +327,7 @@ void eeprom_dump(void)
     start = (rec_count > EEPROM_REC_MAX) ? (rec_count % EEPROM_REC_MAX) : 0;
 
     uart_tx_string("LOG_COUNT=");
-    eeprom_tx_u32(rec_count);
+    uart_tx_uint32(rec_count);
     uart_tx_string("\r\n");
 
     for(i = 0; i < total; i++)

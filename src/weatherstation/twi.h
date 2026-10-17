@@ -16,4 +16,8 @@ uint8_t twi_read_ack(uint8_t *data);  // 0 = OK
 uint8_t twi_read_nack(uint8_t *data); // 0 = OK (ultimo byte de la lectura)
 void twi_stop(void);
 
+// Libera el bus si un esclavo deja SDA/SCL en bajo al arrancar.
+// Llamar antes de twi_init().
+void twi_bus_recover(void);
+
 #endif

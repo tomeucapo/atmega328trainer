@@ -1,4 +1,5 @@
 #include <avr/io.h>
+#include <util/delay.h>
 #include "twi.h"
 
 #define TWI_STATUS (TWSR & 0xF8)
@@ -22,6 +23,39 @@ void twi_init(void)
     TWBR = TWBR_VALUE;
     TWSR = (0<<TWPS1) | (0<<TWPS0); // prescaler 1x
     TWCR = (1<<TWEN);
+}
+
+// SCL=PC5, SDA=PC4. Al arrancar, un esclavo puede dejar SDA en bajo
+// (transaccion interrumpida por el corte de alimentacion); pulsando
+// SCL hasta 9 veces se libera el bus.
+void twi_bus_recover(void)
+{
+    // Pines como GPIO en alta impedancia (las pull-ups son externas)
+    DDRC &= ~((1<<PC4) | (1<<PC5));
+    PORTC &= ~((1<<PC4) | (1<<PC5));
+
+    // SCL como salida; si SDA esta en bajo, se generan pulsos
+    DDRC |= (1<<PC5);
+
+    for(uint8_t i = 0; i < 9; i++)
+    {
+        PORTC &= ~(1<<PC5);
+        _delay_us(5);
+        PORTC |= (1<<PC5);
+        _delay_us(5);
+    }
+
+    // STOP: SDA baja -> sube con SCL en alto
+    DDRC |= (1<<PC4);
+    PORTC &= ~(1<<PC4);
+    _delay_us(5);
+    PORTC |= (1<<PC5);
+    _delay_us(5);
+    PORTC |= (1<<PC4);
+    _delay_us(5);
+
+    // Devuelve los pines al TWI (entradas, open-drain con pull-up)
+    DDRC &= ~((1<<PC4) | (1<<PC5));
 }
 
 uint8_t twi_start(void)
