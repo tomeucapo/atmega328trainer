@@ -335,7 +335,7 @@ static void task_serial(void)
             rx_buffer[rx_index] = 0;
             rx_index = 0;
 
-            if(strcmp(rx_buffer,"@STAT_ANEMO") == 0)
+            if(strcmp(rx_buffer,"@GET_ANEMO") == 0)
             {
                 dtostrf(velocidad,6,3,buffer);
 
@@ -343,7 +343,7 @@ static void task_serial(void)
                 uart_tx_string(buffer);
                 uart_tx_string(" km/h\r\n");
             }
-            else if(strcmp(rx_buffer,"@STAT_RAIN") == 0)
+            else if(strcmp(rx_buffer,"@GET_RAIN") == 0)
             {
                 uint32_t count;
                 float mm;
@@ -366,15 +366,8 @@ static void task_serial(void)
                 uart_tx_string(buffer);
 
                 uart_tx_string("\r\n");
-
-                uart_tx_string("RAIN_LM2=");
-
-                dtostrf(mm,6,2,buffer);
-                uart_tx_string(buffer);
-
-                uart_tx_string("\r\n");
             }
-            else if(strcmp(rx_buffer,"@STAT_TEMP") == 0)
+            else if(strcmp(rx_buffer,"@GET_TEMP") == 0)
             {
                 float temp = ds18b20_get_temp();
 
