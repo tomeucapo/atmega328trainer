@@ -35,9 +35,11 @@ void mcp23017_init(void)
     // BANK=0 (mapa de registros secuencial, ver mcp23017.h)
     mcp23017_write_reg(MCP23017_IOCON, 0x00);
 
-    // por defecto: todo salidas a 0
-    mcp23017_direction(MCP23017_PORTA, 0x00);
-    mcp23017_direction(MCP23017_PORTB, 0x00);
+    // GPA7 es entrada con pulsador a masa (no tocar como salida),
+    // GPA0..GPA6 salidas a 0, GPB todo salidas a 0. Se configura
+    // IODIRA una sola vez para no pisar el sentido de GPA7.
+    mcp23017_write_reg(MCP23017_IODIRA, 0x80);
+    mcp23017_write_reg(MCP23017_IODIRB, 0x00);
     mcp23017_write_reg(MCP23017_OLATA, 0x00);
     mcp23017_write_reg(MCP23017_OLATB, 0x00);
 }

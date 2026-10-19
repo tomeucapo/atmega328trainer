@@ -196,6 +196,14 @@ void ssd1306_clear(void)
     memset(ssd1306_buffer, 0, sizeof(ssd1306_buffer));
 }
 
+void ssd1306_draw_pixel(uint8_t x, uint8_t y)
+{
+    if(x >= SSD1306_WIDTH || y >= SSD1306_HEIGHT)
+        return;
+
+    ssd1306_buffer[(y >> 3) * SSD1306_WIDTH + x] |= (uint8_t)(1 << (y & 7));
+}
+
 void ssd1306_draw_char(uint8_t col, uint8_t page, char c)
 {
     if(page >= SSD1306_PAGES)

@@ -27,6 +27,15 @@
 #define RAIN_DEBOUNCE_MS 100
 #define RAIN_MM_PER_TIP 0.3f
 
+// Historial de temperatura para la grafica del OLED
+#define TEMP_HISTORY_LEN 64               // potencia de 2 (2 px por muestra)
+#define TEMP_HIST_EMPTY ((int8_t)-128)    // marca de "sin dato"
+#define TEMP_SAMPLE_MS 15000              // una muestra cada 15 s
+
+// Boton en el MCP23017 (GPA7, pull-up interno, activo a GND)
+#define BTN_MCP_PORT MCP23017_PORTA
+#define BTN_MCP_PIN 7
+
 // ======================================================
 // ANEMOMETRO
 // ======================================================
@@ -46,6 +55,14 @@ float current_temp = DS18B20_ERROR_TEMP;
 
 volatile uint32_t rain_count = 0;
 volatile uint32_t rain_last_pulse = 0;
+
+// ======================================================
+// VISTA OLED Y HISTORIAL DE TEMPERATURA
+// ======================================================
+
+static int8_t temp_history[TEMP_HISTORY_LEN];
+static uint8_t temp_hist_head = 0;
+static uint8_t view_mode = 0;   // 0 = texto, 1 = grafica
 
 // ======================================================
 // TIMER1 INPUT CAPTURE (ANEMOMETRO)
@@ -204,7 +221,7 @@ static uint8_t parse_mcp_pin(const char *s, uint8_t *pin)
     {
         value = value * 10 + (*s - '0');
 
-        if(value > 15)
+        if(value > 7)
             return 0;
 
         s++;
@@ -242,8 +259,117 @@ void print_time(uint32_t seconds)
     ssd1306_draw_string(7, 1, line);
 }
 
+// Grafica de temperatura: 128 muestras (1 px por columna), rango
+// automatico min/max, lineas verticales conectando muestras seguidas.
+void update_oled_graph(void)
+{
+    char line[24] = {0};
+    char tmin[8], tmax[8];
+    int8_t vmin = 127, vmax = -128;
+    uint8_t i, x;
+    uint8_t prev_y = 0, have_prev = 0;
+
+    ssd1306_clear();
+
+    strcpy(line, "TEMP ");
+    if(current_temp == DS18B20_ERROR_TEMP)
+    {
+        strcat(line, "--.- C");
+    }
+    else
+    {
+        char t[8];
+        dtostrf(current_temp, 4, 1, t);
+        strcat(line, t);
+        strcat(line, " C");
+    }
+    ssd1306_draw_string_centered(0, line);
+
+    for(i = 0; i < TEMP_HISTORY_LEN; i++)
+    {
+        int8_t v = temp_history[i];
+
+        if(v == TEMP_HIST_EMPTY)
+            continue;
+
+        if(v < vmin) vmin = v;
+        if(v > vmax) vmax = v;
+    }
+
+    if(vmax < vmin)
+    {
+        ssd1306_draw_string_centered(3, "SIN DATOS");
+        ssd1306_update();
+        return;
+    }
+
+    if(vmax == vmin)
+        vmax = vmin + 1;
+
+    // Grafica en y = 8..55 (48 px de alto); pagina 0 y 7 para texto.
+    // Cada muestra ocupa 2 px de ancho.
+    for(x = 0; x < TEMP_HISTORY_LEN; x++)
+    {
+        uint8_t idx = (uint8_t)((temp_hist_head + x) & (TEMP_HISTORY_LEN - 1));
+        int8_t v = temp_history[idx];
+        uint8_t px = (uint8_t)(x * 2);
+        uint8_t y;
+
+        if(v == TEMP_HIST_EMPTY)
+        {
+            have_prev = 0;
+            continue;
+        }
+
+        y = (uint8_t)(8 + (uint16_t)(vmax - v) * 47 / (vmax - vmin));
+
+        if(have_prev)
+        {
+            uint8_t y0 = prev_y, y1 = y, yy;
+
+            if(y0 > y1)
+            {
+                uint8_t swap = y0;
+                y0 = y1;
+                y1 = swap;
+            }
+
+            for(yy = y0; yy <= y1; yy++)
+            {
+                ssd1306_draw_pixel(px, yy);
+                ssd1306_draw_pixel((uint8_t)(px + 1), yy);
+            }
+        }
+        else
+        {
+            ssd1306_draw_pixel(px, y);
+            ssd1306_draw_pixel((uint8_t)(px + 1), y);
+        }
+
+        prev_y = y;
+        have_prev = 1;
+    }
+
+    // Pie: min..max del rango mostrado
+    dtostrf(vmin, 3, 0, tmin);
+    dtostrf(vmax, 3, 0, tmax);
+    strcpy(line, tmin);
+    strcat(line, "..");
+    strcat(line, tmax);
+    strcat(line, " C");
+    ssd1306_draw_string(7, 34, line);
+
+    ssd1306_update();
+}
+
 void update_oled(void)
 {
+    if(view_mode)
+    {
+        update_oled_graph();
+        return;
+    }
+
     char line[24] = {0};
     float rain_mm;
 
@@ -294,10 +420,43 @@ static void task_anemo(void)
 
 // Sensores: la lectura del DS18B20 bloquea ~100 ms; se evita
 // si hay bytes de UART pendientes.
+static void push_temp_sample(float t)
+{
+    int8_t v;
+
+    if(t == DS18B20_ERROR_TEMP)
+    {
+        v = TEMP_HIST_EMPTY;
+    }
+    else
+    {
+        int16_t r = (t >= 0.0f) ? (int16_t)(t + 0.5f) : (int16_t)(t - 0.5f);
+
+        if(r > 127) r = 127;
+        if(r < -127) r = -127;
+
+        v = (int8_t)r;
+    }
+
+    temp_history[temp_hist_head] = v;
+    temp_hist_head = (uint8_t)((temp_hist_head + 1) & (TEMP_HISTORY_LEN - 1));
+}
+
 static void task_sensors(void)
 {
+    static uint32_t last_sample = 0;
+    uint32_t now;
+
     if(!uart_rx_available())
         current_temp = ds18b20_get_temp();
+
+    now = sched_get_tick();
+
+    if((now - last_sample) >= TEMP_SAMPLE_MS)
+    {
+        last_sample = now;
+        push_temp_sample(current_temp);
+    }
 }
 
 // Log: guarda una lectura periodica en la EEPROM I2C. La
@@ -321,6 +480,80 @@ static void task_display(void)
         return;
 
     update_oled();
+}
+
+// Boton MCP23017 (GPA7): con pull-up interno, reposo en alto y
+// pulsado a GND. Se exigen 3 lecturas seguidas distintas (~150 ms)
+// para confirmar el cambio de estado.
+static void task_button(void)
+{
+    static uint8_t stable = 1;
+    static uint8_t counter = 0;
+
+    uint8_t raw = mcp23017_read_pin(BTN_MCP_PORT, BTN_MCP_PIN);
+
+    if(raw == stable)
+    {
+        counter = 0;
+        return;
+    }
+
+    if(++counter >= 3)
+    {
+        stable = raw;
+        counter = 0;
+
+        if(stable == 0)
+            view_mode ^= 1;
+    }
+}
+
+// @MCP_ON / @MCP_OFF <pin> | A<pin> | B<pin>
+// Puerto por defecto A; el pin GPA7 esta reservado (pulsador a masa).
+// Devuelve 1 si aplico el cambio, 0 (con ERR) si el pin no es valido.
+static uint8_t handle_mcp_cmd(const char *arg, uint8_t value)
+{
+    char buffer[8];
+    char port;
+    uint8_t pin;
+
+    while(*arg == ' ')
+        arg++;
+
+    if(*arg == 'B' || *arg == 'b')
+    {
+        port = 'B';
+        arg++;
+    }
+    else
+    {
+        port = 'A';
+
+        if(*arg == 'A' || *arg == 'a')
+            arg++;
+    }
+
+    if(!parse_mcp_pin(arg, &pin) ||
+       (port == 'A' && pin == BTN_MCP_PIN))
+    {
+        uart_tx_string("ERR\r\n");
+        return 0;
+    }
+
+    mcp23017_write_pin(port == 'B' ? MCP23017_PORTB : MCP23017_PORTA,
+                       pin, value);
+
+    uart_tx_string(value ? "MCP_ON=" : "MCP_OFF=");
+
+    buffer[0] = port;
+    buffer[1] = 0;
+    uart_tx_string(buffer);
+
+    utoa(pin, buffer, 10);
+    uart_tx_string(buffer);
+    uart_tx_string("\r\n");
+
+    return 1;
 }
 
 // UART: procesa los comandos serie terminados en CR/LF.
@@ -408,41 +641,19 @@ static void task_serial(void)
             {
                 eeprom_dump();
             }
+            else if(strcmp(rx_buffer,"@VIEW") == 0)
+            {
+                view_mode ^= 1;
+
+                uart_tx_string(view_mode ? "VIEW=GRAPH\r\n" : "VIEW=TEXT\r\n");
+            }
             else if(strncmp(rx_buffer,"@MCP_ON",7) == 0)
             {
-                uint8_t pin;
-
-                if(parse_mcp_pin(rx_buffer + 7, &pin))
-                {
-                    mcp23017_write_pin(pin / 8, pin % 8, 1);
-
-                    uart_tx_string("MCP_ON=");
-                    utoa(pin, buffer, 10);
-                    uart_tx_string(buffer);
-                    uart_tx_string("\r\n");
-                }
-                else
-                {
-                    uart_tx_string("ERR\r\n");
-                }
+                handle_mcp_cmd(rx_buffer + 7, 1);
             }
             else if(strncmp(rx_buffer,"@MCP_OFF",8) == 0)
             {
-                uint8_t pin;
-
-                if(parse_mcp_pin(rx_buffer + 8, &pin))
-                {
-                    mcp23017_write_pin(pin / 8, pin % 8, 0);
-
-                    uart_tx_string("MCP_OFF=");
-                    utoa(pin, buffer, 10);
-                    uart_tx_string(buffer);
-                    uart_tx_string("\r\n");
-                }
-                else
-                {
-                    uart_tx_string("ERR\r\n");
-                }
+                handle_mcp_cmd(rx_buffer + 8, 0);
             }
             else
             {
@@ -464,6 +675,7 @@ static void task_serial(void)
 // refresco de la pantalla.
 sched_task_t task_list[] = {
     { task_anemo,    50,      0 },
+    { task_button,   50,      0 },
     { task_serial,    5,      0 },
     { task_display, 500,      0 },
     { task_sensors, 2000,   100 },
@@ -508,6 +720,8 @@ void welcome(void)
 
 int main(void)
 {
+    uint8_t i;
+
     io_init();
     uart_init();
     timer1_init();
@@ -521,10 +735,15 @@ int main(void)
     twi_bus_recover();
     _delay_ms(150);
 
-    // MCP23017 (PC4=SDA, PC5=SCL)
+    // MCP23017 (PC4=SDA, PC5=SCL). mcp23017_init() ya deja GPA7 como
+    // entrada (pulsador a masa) y el resto como salidas.
     mcp23017_init();
-    mcp23017_direction(MCP23017_PORTA, 0x00); // reles: salidas
+    mcp23017_pullup(MCP23017_PORTA, (1 << BTN_MCP_PIN)); // pull-up en GPA7
     mcp23017_direction(MCP23017_PORTB, 0x00); // LEDs: salidas
+
+    // Historial de temperatura vacio
+    for(i = 0; i < TEMP_HISTORY_LEN; i++)
+        temp_history[i] = TEMP_HIST_EMPTY;
 
     // OLED SSD1306 en el mismo bus I2C
     ssd1306_init();
