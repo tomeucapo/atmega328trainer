@@ -245,6 +245,7 @@ void print_time(uint32_t seconds)
 void update_oled(void)
 {
     char line[24] = {0};
+    float rain_mm;
 
     ssd1306_clear();
 
@@ -256,7 +257,12 @@ void update_oled(void)
 
     ssd1306_draw_string_centered(2, "LLUVIA");
 
-    dtostrf(rain_count * RAIN_MM_PER_TIP, 4, 2, line);
+    // rain_count es uint32 modificado en la ISR: lectura atomica
+    cli();
+    rain_mm = rain_count * RAIN_MM_PER_TIP;
+    sei();
+
+    dtostrf(rain_mm, 4, 2, line);
     strcat(line, " mm");
     ssd1306_draw_string_centered(3, line);
 
