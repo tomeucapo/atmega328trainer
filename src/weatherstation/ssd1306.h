@@ -19,6 +19,7 @@ void ssd1306_init(void);
 void ssd1306_clear(void);
 
 // Dibujo en el buffer en RAM (fuente 5x7, un char = 6 px de ancho)
+void ssd1306_draw_pixel(uint8_t x, uint8_t y);
 void ssd1306_draw_char(uint8_t col, uint8_t page, char c);
 void ssd1306_draw_string(uint8_t page, uint8_t col, const char *s);
 void ssd1306_draw_string_centered(uint8_t page, const char *s);

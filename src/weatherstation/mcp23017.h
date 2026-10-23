@@ -34,6 +34,7 @@
 #define MCP23017_OUTPUT 0
 #define MCP23017_INPUT  1
 
+uint8_t mcp23017_detect(void); // 1 = ACK en MCP23017_I2C_ADDR
 void mcp23017_init(void);
 void mcp23017_direction(uint8_t port, uint8_t mask); // 1 = entrada, 0 = salida
 void mcp23017_pullup(uint8_t port, uint8_t mask);

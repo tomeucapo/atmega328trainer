@@ -327,7 +327,7 @@ void eeprom_dump(void)
     start = (rec_count > EEPROM_REC_MAX) ? (rec_count % EEPROM_REC_MAX) : 0;
 
     uart_tx_string("LOG_COUNT=");
-    eeprom_tx_u32(rec_count);
+    uart_tx_uint32(rec_count);
     uart_tx_string("\r\n");
 
     for(i = 0; i < total; i++)
@@ -355,17 +355,13 @@ void eeprom_dump(void)
              | ((uint32_t)buf[11] << 24);
 
         uart_tx_string("LOG ");
-        //eeprom_tx_u32(uptime);
-	uart_tx_time(uptime);
+    	uart_tx_time(uptime);
         uart_tx_char(' ');
-        //eeprom_tx_x10((int16_t)wind_x10);
-	uart_tx_decimal((int16_t)wind_x10);
+    	uart_tx_decimal((int16_t)wind_x10);
         uart_tx_char(' ');
-        //eeprom_tx_x10(temp_x10);
-	uart_tx_decimal(temp_x10);
+    	uart_tx_decimal(temp_x10);
         uart_tx_char(' ');
-        //eeprom_tx_u32(rain);
-	uart_tx_uint32(rain);
+    	uart_tx_uint32(rain);
         uart_tx_string("\r\n");
     }
 

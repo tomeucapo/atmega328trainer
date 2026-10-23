@@ -45,7 +45,7 @@ add_link_options(
 # ==============================
 
 file(GLOB SRC_FILES
-    anemometre/*.c
+    weatherstation/*.c
 )
 
 add_executable(${TARGET}.elf ${SRC_FILES})

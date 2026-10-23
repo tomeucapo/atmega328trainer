@@ -1,6 +1,7 @@
 #include <avr/io.h>
 #include <avr/pgmspace.h>
 #include <string.h>
+#include <util/delay.h>
 #include "twi.h"
 #include "ssd1306.h"
 
@@ -117,21 +118,30 @@ static const uint8_t font5x7[96][5] PROGMEM = {
     {0x78,0x46,0x41,0x46,0x78}  // 0x7F DEL
 };
 
-static void ssd1306_cmd(uint8_t cmd)
+// Devuelve 1 si el SSD1306 ha reconocido el comando (ACK).
+static uint8_t ssd1306_cmd(uint8_t cmd)
 {
+    uint8_t ok = 1;
+
     twi_start();
-    twi_write_byte(SSD1306_I2C_ADDR << 1);
-    twi_write_byte(SSD1306_COMMAND);
-    twi_write_byte(cmd);
+    ok &= (uint8_t)(twi_write_byte(SSD1306_I2C_ADDR << 1) == 0);
+    ok &= (uint8_t)(twi_write_byte(SSD1306_COMMAND) == 0);
+    ok &= (uint8_t)(twi_write_byte(cmd) == 0);
     twi_stop();
+
+    return ok;
 }
 
 // Selecciona la pagina y vuelve a la columna 0 (modo paginado)
-static void ssd1306_set_page(uint8_t page)
+static uint8_t ssd1306_set_page(uint8_t page)
 {
-    ssd1306_cmd(0xB0 | (page & 0x07));
-    ssd1306_cmd(0x00);
-    ssd1306_cmd(0x10);
+    uint8_t ok = 1;
+
+    ok &= ssd1306_cmd(0xB0 | (page & 0x07));
+    ok &= ssd1306_cmd(0x00);
+    ok &= ssd1306_cmd(0x10);
+
+    return ok;
 }
 
 void ssd1306_init(void)
@@ -155,8 +165,20 @@ void ssd1306_init(void)
         0xAF        // display on
     };
 
-    for(uint8_t i = 0; i < sizeof(init_seq); i++)
-        ssd1306_cmd(init_seq[i]);
+    // La OLED puede tardar en arrancar mas que el MCU: reintenta el
+    // init hasta que responda en el bus (max ~1 s).
+    for(uint8_t attempt = 0; attempt < 100; attempt++)
+    {
+        uint8_t ok = 1;
+
+        for(uint8_t i = 0; i < sizeof(init_seq); i++)
+            ok &= ssd1306_cmd(init_seq[i]);
+
+        if(ok)
+            break;
+
+        _delay_ms(10);
+    }
 
     ssd1306_clear();
 
@@ -172,6 +194,14 @@ void ssd1306_init(void)
 void ssd1306_clear(void)
 {
     memset(ssd1306_buffer, 0, sizeof(ssd1306_buffer));
+}
+
+void ssd1306_draw_pixel(uint8_t x, uint8_t y)
+{
+    if(x >= SSD1306_WIDTH || y >= SSD1306_HEIGHT)
+        return;
+
+    ssd1306_buffer[(y >> 3) * SSD1306_WIDTH + x] |= (uint8_t)(1 << (y & 7));
 }
 
 void ssd1306_draw_char(uint8_t col, uint8_t page, char c)
@@ -219,6 +249,7 @@ void ssd1306_update(void)
     {
         uint8_t *cur = &ssd1306_buffer[page * SSD1306_WIDTH];
         uint16_t sum = 0;
+        uint8_t ok;
 
         for(uint8_t i = 0; i < SSD1306_WIDTH; i++)
             sum += cur[i];
@@ -226,16 +257,21 @@ void ssd1306_update(void)
         if(sum == ssd1306_checksum[page])
             continue;
 
-        ssd1306_checksum[page] = sum;
-        ssd1306_set_page(page);
+        ok = ssd1306_set_page(page);
 
         twi_start();
-        twi_write_byte(SSD1306_I2C_ADDR << 1);
-        twi_write_byte(SSD1306_DATA);
+        ok &= (uint8_t)(twi_write_byte(SSD1306_I2C_ADDR << 1) == 0);
+        ok &= (uint8_t)(twi_write_byte(SSD1306_DATA) == 0);
 
         for(uint8_t i = 0; i < SSD1306_WIDTH; i++)
-            twi_write_byte(cur[i]);
+            ok &= (uint8_t)(twi_write_byte(cur[i]) == 0);
 
         twi_stop();
+
+        // Solo da la pagina por enviada si el bus la acepto; si no,
+        // el checksum queda invalido y se reintentara en el proximo
+        // refresco (asi no se queda basura si la OLED arranca tarde).
+        if(ok)
+            ssd1306_checksum[page] = sum;
     }
 }

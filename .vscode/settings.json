@@ -8,5 +8,6 @@
     "AVR.source.libraries": [
         "/usr/lib/avr/include"
     ],
-    "cmake.sourceDirectory": "/home/oem/devel/atmega328trainer/src"
+    "cmake.sourceDirectory": "/home/oem/devel/atmega328trainer/src",
+    "C_Cpp.default.compilerPath": "/usr/bin/avr-gcc"
 }
