@@ -28,6 +28,21 @@ uint8_t mcp23017_read_reg(uint8_t reg)
     return value;
 }
 
+uint8_t mcp23017_detect(void)
+{
+    uint8_t found = 0;
+
+    if(twi_start() == 0)
+    {
+        if(twi_write_byte(MCP23017_I2C_ADDR << 1) == 0)
+            found = 1;
+    }
+
+    twi_stop();
+
+    return found;
+}
+
 void mcp23017_init(void)
 {
     twi_init();

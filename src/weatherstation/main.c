@@ -36,6 +36,10 @@
 #define BTN_MCP_PORT MCP23017_PORTA
 #define BTN_MCP_PIN 7
 
+// LED GPB0 del MCP23017: replica el parpadeo de PD6
+static volatile uint8_t mcp_led_state = 0;
+static uint8_t mcp_present = 0;
+
 // ======================================================
 // ANEMOMETRO
 // ======================================================
@@ -130,6 +134,7 @@ ISR(TIMER0_COMPA_vect)
     if(++blink_counter >= 500)
     {
         PORTD ^= (1<<PORTD6);
+        mcp_led_state ^= 1;
         blink_counter = 0;
     }
 }
@@ -508,6 +513,22 @@ static void task_button(void)
     }
 }
 
+// LED GPB0 del MCP23017: se actualiza desde el estado que togglea
+// la ISR de TIMER0 junto con PD6 (1 Hz).
+static void task_mcp_led(void)
+{
+    static uint8_t last_state = 0;
+
+    if(!mcp_present)
+        return;
+
+    if(mcp_led_state == last_state)
+        return;
+
+    last_state = mcp_led_state;
+    mcp23017_write_pin(MCP23017_PORTB, 0, last_state);
+}
+
 // @MCP_ON / @MCP_OFF <pin> | A<pin> | B<pin>
 // Puerto por defecto A; el pin GPA7 esta reservado (pulsador a masa).
 // Devuelve 1 si aplico el cambio, 0 (con ERR) si el pin no es valido.
@@ -669,6 +690,7 @@ static void task_serial(void)
 sched_task_t task_list[] = {
     { task_anemo,    50,      0 },
     { task_button,   50,      0 },
+    { task_mcp_led, 100,      0 },
     { task_serial,    5,      0 },
     { task_display, 500,      0 },
     { task_sensors, 2000,   100 },
@@ -734,6 +756,9 @@ int main(void)
     mcp23017_pullup(MCP23017_PORTA, (1 << BTN_MCP_PIN)); // pull-up en GPA7
     mcp23017_direction(MCP23017_PORTB, 0x00); // LEDs: salidas
 
+    // Detecta el MCP23017 en el bus I2C (ACK en su direccion)
+    mcp_present = mcp23017_detect();
+
     // Historial de temperatura vacio
     for(i = 0; i < TEMP_HISTORY_LEN; i++)
         temp_history[i] = TEMP_HIST_EMPTY;
@@ -751,6 +776,21 @@ int main(void)
     sched_init(task_list, (uint8_t)(sizeof(task_list) / sizeof(task_list[0])));
 
     uart_tx_string("*** ATMEGA328P WEATHER 1.0\r\n");
+
+    if(mcp_present)
+    {
+        char addr[5] = "0x";
+
+        utoa(MCP23017_I2C_ADDR, addr + 2, 16);
+
+        uart_tx_string("MCP23017 DETECTED I2C ADDR=");
+        uart_tx_string(addr);
+        uart_tx_string("\r\n");
+    }
+    else
+    {
+        uart_tx_string("MCP23017 NOT DETECTED\r\n");
+    }
 
     while(1)
     {
