@@ -243,6 +243,27 @@ void ssd1306_draw_string_centered(uint8_t page, const char *s)
     ssd1306_draw_string(page, (SSD1306_WIDTH - width) / 2, s);
 }
 
+void ssd1306_draw_string_P(uint8_t page, uint8_t col, const char *s)
+{
+    char c;
+
+    while((c = (char)pgm_read_byte(s++)) != '\0' && col <= SSD1306_WIDTH - 6)
+    {
+        ssd1306_draw_char(col, page, c);
+        col += 6;
+    }
+}
+
+void ssd1306_draw_string_centered_P(uint8_t page, const char *s)
+{
+    uint16_t width = strlen_P(s) * 6;
+
+    if(width > SSD1306_WIDTH)
+        width = SSD1306_WIDTH;
+
+    ssd1306_draw_string_P(page, (SSD1306_WIDTH - width) / 2, s);
+}
+
 void ssd1306_update(void)
 {
     for(uint8_t page = 0; page < SSD1306_PAGES; page++)
