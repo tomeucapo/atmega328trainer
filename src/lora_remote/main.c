@@ -8,10 +8,16 @@
 #include <avr/sleep.h>
 #include <avr/wdt.h>
 #include <util/delay.h>
+#include <stdlib.h>
+#include <avr/pgmspace.h>
 #include "twi.h"
 #include "bme280.h"
 #include "sx127x.h"
 #include "lora_proto.h"
+
+#ifndef LORA_DEBUG_UART
+#define LORA_DEBUG_UART 0
+#endif
 
 // ======================================================
 // NODO REMOTO LORA: BME280 (temperatura/humedad/presion)
@@ -39,6 +45,56 @@
 #define LED_DDR  DDRB
 #define LED_PORT PORTB
 #define LED_BIT  PB0
+
+#if LORA_DEBUG_UART
+#define DEBUG_UART_BAUD 9600UL
+#define DEBUG_UART_UBRR ((F_CPU / (16UL * DEBUG_UART_BAUD)) - 1UL)
+
+static void debug_uart_init(void)
+{
+    DDRD |= (1 << DDD1); // PD1/TXD
+    UBRR0H = (uint8_t)(DEBUG_UART_UBRR >> 8);
+    UBRR0L = (uint8_t)DEBUG_UART_UBRR;
+    UCSR0A = 0;
+    UCSR0B = (1 << TXEN0); // Solo transmision; no se usa RX
+    UCSR0C = (1 << UCSZ01) | (1 << UCSZ00); // 8N1
+}
+
+static void debug_uart_char(char c)
+{
+    while(!(UCSR0A & (1 << UDRE0)))
+        ;
+    UDR0 = c;
+}
+
+static void debug_uart_string(const char *s)
+{
+    while(*s)
+        debug_uart_char(*s++);
+}
+
+static void debug_uart_string_P(const char *s)
+{
+    char c;
+
+    while((c = (char)pgm_read_byte(s++)) != '\0')
+        debug_uart_char(c);
+}
+
+static void debug_uart_u16(uint16_t value)
+{
+    char buf[6];
+    utoa(value, buf, 10);
+    debug_uart_string(buf);
+}
+
+static void debug_uart_float(float value, uint8_t precision)
+{
+    char buf[16];
+    dtostrf(value, 1, precision, buf);
+    debug_uart_string(buf);
+}
+#endif
 
 ISR(WDT_vect)
 {
@@ -123,8 +179,15 @@ int main(void)
 {
     uint16_t seq = 0;
 
-    // El nodo no usa UART ni timers.
+    // El nodo solo usa UART cuando se compila con debug; nunca usa timers.
+#if !LORA_DEBUG_UART
     power_usart0_disable();
+#else
+    debug_uart_init();
+    debug_uart_string_P(PSTR("LoRa remote boot, node="));
+    debug_uart_u16(LORA_NODE_ID);
+    debug_uart_string_P(PSTR("\r\n"));
+#endif
     power_timer0_disable();
     power_timer1_disable();
     power_timer2_disable();
@@ -139,22 +202,37 @@ int main(void)
     // despues que el MCU).
     while(!bme280_init())
     {
+#if LORA_DEBUG_UART
+        debug_uart_string_P(PSTR("ERROR: BME280 init; retry\r\n"));
+#endif
         led_blink(2);
         _delay_ms(500);
     }
+#if LORA_DEBUG_UART
+    debug_uart_string_P(PSTR("BME280 OK\r\n"));
+#endif
     bme280_sleep();
 
     // SX127x: idem.
     while(!sx127x_init())
     {
+#if LORA_DEBUG_UART
+        debug_uart_string_P(PSTR("ERROR: SX127x init; retry\r\n"));
+#endif
         led_blink(3);
         _delay_ms(500);
     }
+#if LORA_DEBUG_UART
+    debug_uart_string_P(PSTR("SX127x OK\r\n"));
+#endif
 
     sei();
 
 #if LORA_NODE_ID == 2
     // Desfase inicial de 32 s para reducir colisiones con el nodo 1.
+#if LORA_DEBUG_UART
+    debug_uart_string_P(PSTR("Initial TX offset: 32 s\r\n"));
+#endif
     for(uint8_t i = 0; i < 4; i++)
         sleep_8s();
 #endif
@@ -169,6 +247,8 @@ int main(void)
             int16_t temp_x10;
             uint16_t hum_x10;
             uint16_t press_hpa;
+            uint16_t battery_mv;
+            uint8_t tx_ok;
 
             if(d.temperature >= 0.0f)
                 temp_x10 = (int16_t)(d.temperature * 10.0f + 0.5f);
@@ -178,17 +258,41 @@ int main(void)
             hum_x10 = (uint16_t)(d.humidity * 10.0f + 0.5f);
             press_hpa = (uint16_t)(d.pressure + 0.5f);
 
+            battery_mv = read_battery_mv();
             lora_build_weather(&frame, LORA_NODE_ID, seq, temp_x10, hum_x10,
-                               press_hpa, read_battery_mv());
+                               press_hpa, battery_mv);
+
+#if LORA_DEBUG_UART
+            debug_uart_string_P(PSTR("DATA seq="));
+            debug_uart_u16(seq);
+            debug_uart_string_P(PSTR(" T="));
+            debug_uart_float(d.temperature, 2);
+            debug_uart_string_P(PSTR("C H="));
+            debug_uart_float(d.humidity, 1);
+            debug_uart_string_P(PSTR("% P="));
+            debug_uart_float(d.pressure, 1);
+            debug_uart_string_P(PSTR("hPa VIN="));
+            debug_uart_u16(battery_mv);
+            debug_uart_string_P(PSTR("mV\r\nTX..."));
+#endif
 
             LED_PORT |= (1 << LED_BIT);
-            sx127x_send((const uint8_t *)&frame, sizeof(frame));
+            tx_ok = sx127x_send((const uint8_t *)&frame, sizeof(frame));
             LED_PORT &= (uint8_t)~(1 << LED_BIT);
+
+#if LORA_DEBUG_UART
+            debug_uart_string_P(tx_ok ? PSTR(" OK\r\n") : PSTR(" TIMEOUT\r\n"));
+#else
+            (void)tx_ok;
+#endif
 
             seq++;
         }
         else
         {
+#if LORA_DEBUG_UART
+            debug_uart_string_P(PSTR("ERROR: BME280 read\r\n"));
+#endif
             led_blink(1);
         }
 

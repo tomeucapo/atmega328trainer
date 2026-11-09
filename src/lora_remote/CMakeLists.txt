@@ -4,6 +4,7 @@ cmake_minimum_required(VERSION 3.16)
 set(MCU atmega328p)
 set(F_CPU 8000000UL)
 set(LORA_NODE_ID 1 CACHE STRING "ID de este nodo LoRa (1 o 2)")
+option(LORA_DEBUG_UART "Enviar diagnostico por UART en PD1/TXD" OFF)
 
 if(NOT LORA_NODE_ID STREQUAL "1" AND NOT LORA_NODE_ID STREQUAL "2")
     message(FATAL_ERROR "LORA_NODE_ID debe ser 1 o 2")
@@ -36,6 +37,12 @@ add_compile_options(
     -Wall
     -std=gnu11
 )
+
+if(LORA_DEBUG_UART)
+    add_compile_options(-DLORA_DEBUG_UART=1)
+else()
+    add_compile_options(-DLORA_DEBUG_UART=0)
+endif()
 
 add_link_options(
     -mmcu=${MCU}

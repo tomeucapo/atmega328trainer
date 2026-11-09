@@ -981,31 +981,15 @@ sched_task_t task_list[] = {
 
 void welcome(void)
 {
-        uint8_t i;
+    ssd1306_clear();
+    ssd1306_draw_string_centered_P(3, PSTR("Weather Station 1.0"));
+    ssd1306_draw_string_centered_P(4, PSTR("TCC 2026(C)"));
+    ssd1306_update();
 
-        for(i = 0; i <= SSD1306_PAGES; i++)
-        {
-            ssd1306_clear();
-            if(i < SSD1306_PAGES)
-                ssd1306_draw_string_centered_P(i, PSTR("Weather Station 1.0"));
-            if(i > 0)
-                ssd1306_draw_string_centered_P(i - 1, PSTR("TCC 2026(C)"));
-            ssd1306_update();
-            _delay_ms(120);
-        }
+    _delay_ms(2500);
 
-        _delay_ms(2000);
-
-        for(i = SSD1306_PAGES; i > 0; i--)
-        {
-            ssd1306_clear();
-            if(i <= SSD1306_PAGES)
-                ssd1306_draw_string_centered_P(i - 1, PSTR("Weather Station 1.0"));
-            if(i < SSD1306_PAGES)
-                ssd1306_draw_string_centered_P(i, PSTR("TCC 2026(C)"));
-            ssd1306_update();
-            _delay_ms(120);
-        }
+    ssd1306_clear();
+    ssd1306_update();
 }
 
 
