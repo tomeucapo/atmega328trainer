@@ -3,6 +3,11 @@ cmake_minimum_required(VERSION 3.16)
 # Nodo remoto LoRa: ATmega328P a 3.3 V / 8 MHz.
 set(MCU atmega328p)
 set(F_CPU 8000000UL)
+set(LORA_NODE_ID 1 CACHE STRING "ID de este nodo LoRa (1 o 2)")
+
+if(NOT LORA_NODE_ID STREQUAL "1" AND NOT LORA_NODE_ID STREQUAL "2")
+    message(FATAL_ERROR "LORA_NODE_ID debe ser 1 o 2")
+endif()
 
 # ==============================
 # Toolchain AVR (antes de project())
@@ -26,6 +31,7 @@ set(WS ../weatherstation)
 add_compile_options(
     -mmcu=${MCU}
     -DF_CPU=${F_CPU}
+    -DLORA_NODE_ID=${LORA_NODE_ID}
     -Os
     -Wall
     -std=gnu11

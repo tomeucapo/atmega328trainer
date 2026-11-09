@@ -11,11 +11,24 @@
 #define TWI_MR_SLA_ACK   0x40
 #define TWI_MR_DATA_ACK  0x50
 #define TWI_MR_DATA_NACK 0x58
+#define TWI_WAIT_LIMIT   10000U
 
 static uint8_t twi_wait_twint(void)
 {
-    while(!(TWCR & (1<<TWINT)));
-    return TWI_STATUS;
+    uint16_t guard;
+
+    for(guard = 0; guard < TWI_WAIT_LIMIT; guard++)
+    {
+        if(TWCR & (1<<TWINT))
+            return TWI_STATUS;
+    }
+
+    // Si el periferico queda esperando una transferencia, libera el bus
+    // y reinicia TWI para que el bloqueo no alcance al bucle principal.
+    TWCR = 0;
+    twi_bus_recover();
+    twi_init();
+    return 0xFF;
 }
 
 void twi_init(void)
@@ -117,4 +130,11 @@ void twi_stop(void)
     // Espera a que el hardware complete la condicion STOP; si no,
     // un START inmediatamente posterior puede perderse.
     while((TWCR & (1<<TWSTO)) && ++guard < 10000);
+
+    if(TWCR & (1<<TWSTO))
+    {
+        TWCR = 0;
+        twi_bus_recover();
+        twi_init();
+    }
 }

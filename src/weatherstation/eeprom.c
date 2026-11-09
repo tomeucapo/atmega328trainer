@@ -57,11 +57,14 @@ static uint8_t eeprom_slave(uint16_t addr)
 // se sondea el ACK hasta que vuelve a estar listo.
 static void eeprom_wait_ready(uint8_t slave_w)
 {
-    uint16_t guard = 0;
+    // La escritura interna tarda como maximo unos 5 ms. Limita el
+    // sondeo para que una EEPROM ausente no congele las demas tareas.
+    uint8_t guard;
 
-    for(;;)
+    for(guard = 0; guard < 100; guard++)
     {
-        twi_start();
+        if(twi_start())
+            return;
 
         if(twi_write_byte(slave_w) == 0)
         {
@@ -70,9 +73,6 @@ static void eeprom_wait_ready(uint8_t slave_w)
         }
 
         twi_stop();
-
-        if(++guard > 20000)
-            return;
     }
 }
 

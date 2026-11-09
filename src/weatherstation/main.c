@@ -63,19 +63,35 @@ float bme_press = 0;
 uint8_t bme_present = 0;
 
 // ======================================================
-// NODO REMOTO LORA (BME280 exterior)
+// NODOS REMOTOS LORA (BME280 en dos ubicaciones)
 // ======================================================
 
 #define LORA_TIMEOUT_MS 180000UL   // 3 minutos sin tramas
 
-float ext_temp = 0;
-float ext_hum = 0;
-float ext_press = 0;
-uint32_t ext_last = 0;
-uint8_t ext_ok = 0;
+typedef struct {
+    float temp;
+    float hum;
+    float press;
+    uint32_t last;
+    uint16_t seq;
+    uint16_t battery_mv;
+    uint8_t ok;
+} lora_remote_data_t;
+
+static lora_remote_data_t ext_nodes[LORA_NODE_COUNT];
 uint8_t lora_present = 0;
-uint16_t lora_seq = 0;
 uint16_t lora_bad = 0;
+
+// Para funciones existentes que requieren un solo sensor, se prioriza
+// el nodo 1 y se usa el nodo 2 como respaldo.
+static int8_t preferred_ext_node(void)
+{
+    if(ext_nodes[0].ok)
+        return 0;
+    if(ext_nodes[1].ok)
+        return 1;
+    return -1;
+}
 
 // ======================================================
 // PLUVIOMETRO
@@ -288,15 +304,17 @@ void print_time(uint32_t seconds)
     ssd1306_draw_string(7, 1, line);
 }
 
-// Temperatura a mostrar: DS18B20 exterior, nodo LoRa de respaldo
-// y, por ultimo, el BME280 interior.
+// Temperatura a mostrar: DS18B20, nodo LoRa disponible y BME280 interior.
 static float oled_temp(void)
 {
+    int8_t remote;
+
     if(current_temp != DS18B20_ERROR_TEMP)
         return current_temp;
 
-    if(ext_ok)
-        return ext_temp;
+    remote = preferred_ext_node();
+    if(remote >= 0)
+        return ext_nodes[(uint8_t)remote].temp;
 
     if(bme_present && bme_temp > -50.0f)
         return bme_temp;
@@ -514,12 +532,13 @@ static void task_sensors(void)
     if((now - last_sample) >= TEMP_SAMPLE_MS)
     {
         float tshow = current_temp;
+        int8_t remote = preferred_ext_node();
 
         last_sample = now;
 
-        // Prioridad: DS18B20 exterior, nodo LoRa, BME280 interior.
-        if(tshow == DS18B20_ERROR_TEMP && ext_ok)
-            tshow = ext_temp;
+        // Prioridad: DS18B20, nodo LoRa disponible, BME280 interior.
+        if(tshow == DS18B20_ERROR_TEMP && remote >= 0)
+            tshow = ext_nodes[(uint8_t)remote].temp;
         if(tshow == DS18B20_ERROR_TEMP && bme_present && bme_temp > -50.0f)
             tshow = bme_temp;
 
@@ -535,16 +554,18 @@ static void task_log(void)
     float tlog = current_temp;
     float hlog = 0.0f;
     float plog = 0.0f;
+    int8_t remote = preferred_ext_node();
 
-    // Humedad/presion exterior del nodo LoRa; si no hay enlace,
+    // Humedad/presion exterior del primer nodo LoRa disponible; si no hay enlace,
     // se usan las del BME280 interior como respaldo.
-    if(ext_ok)
+    if(remote >= 0)
     {
-        hlog = ext_hum;
-        plog = ext_press;
+        lora_remote_data_t *node = &ext_nodes[(uint8_t)remote];
+        hlog = node->hum;
+        plog = node->press;
 
         if(tlog == DS18B20_ERROR_TEMP)
-            tlog = ext_temp;
+            tlog = node->temp;
     }
     else if(bme_present)
     {
@@ -581,6 +602,9 @@ static void task_button(void)
     static uint8_t stable = 1;
     static uint8_t counter = 0;
 
+    if(!mcp_present)
+        return;
+
     uint8_t raw = mcp23017_read_pin(BTN_MCP_PORT, BTN_MCP_PIN);
 
     if(raw == stable)
@@ -615,7 +639,7 @@ static void task_mcp_led(void)
     mcp23017_write_pin(MCP23017_PORTB, 0, last_state);
 }
 
-// LoRa: recoge tramas del nodo remoto (temperatura, humedad,
+// LoRa: recoge tramas de los nodos remotos (temperatura, humedad,
 // presion y bateria) y marca el enlace como caido si dejan de
 // llegar durante LORA_TIMEOUT_MS.
 static void task_lora(void)
@@ -633,12 +657,22 @@ static void task_lora(void)
 
         if(lora_parse_weather(buf, len, &w))
         {
-            ext_temp = w.temp_x10 / 10.0f;
-            ext_hum = w.hum_x10 / 10.0f;
-            ext_press = w.press_hpa;
-            ext_last = sched_get_tick();
-            ext_ok = 1;
-            lora_seq = w.seq;
+            if(w.node_id >= 1 && w.node_id <= LORA_NODE_COUNT)
+            {
+                lora_remote_data_t *node = &ext_nodes[w.node_id - 1];
+                node->temp = w.temp_x10 / 10.0f;
+                node->hum = w.hum_x10 / 10.0f;
+                node->press = w.press_hpa;
+                node->last = sched_get_tick();
+                node->ok = 1;
+                node->seq = w.seq;
+                // Solo v3 mide VIN; v1/v2 reportaban Vcc del microcontrolador.
+                node->battery_mv = (w.version == LORA_VERSION) ? w.battery_mv : 0;
+            }
+            else
+            {
+                lora_bad++;
+            }
         }
         else
         {
@@ -648,8 +682,81 @@ static void task_lora(void)
 
     now = sched_get_tick();
 
-    if(ext_ok && (now - ext_last) > LORA_TIMEOUT_MS)
-        ext_ok = 0;
+    for(uint8_t i = 0; i < LORA_NODE_COUNT; i++)
+    {
+        if(ext_nodes[i].ok && (now - ext_nodes[i].last) > LORA_TIMEOUT_MS)
+            ext_nodes[i].ok = 0;
+    }
+}
+
+static void print_ext_status(uint8_t index, uint8_t numbered)
+{
+    lora_remote_data_t *node = &ext_nodes[index];
+    char buffer[16];
+    char suffix = (char)('1' + index);
+
+    if(!lora_present)
+    {
+        uart_tx_string_P(PSTR("LORA_NOT_FOUND\r\n"));
+        return;
+    }
+
+    uart_tx_string_P(PSTR("EXT"));
+    if(numbered)
+        uart_tx_char(suffix);
+    if(!node->ok)
+    {
+        uart_tx_string_P(PSTR("_LINK=NO\r\n"));
+        return;
+    }
+
+    uart_tx_string_P(PSTR("_LINK=OK\r\nEXT"));
+    if(numbered)
+        uart_tx_char(suffix);
+    uart_tx_string_P(PSTR("_AGE="));
+    ultoa((sched_get_tick() - node->last) / 1000, buffer, 10);
+    uart_tx_string(buffer);
+    uart_tx_string_P(PSTR(" s\r\nEXT"));
+    if(numbered)
+        uart_tx_char(suffix);
+    uart_tx_string_P(PSTR("_TEMP="));
+    dtostrf(node->temp, 6, 2, buffer);
+    uart_tx_string(buffer);
+    uart_tx_string_P(PSTR(" C\r\nEXT"));
+    if(numbered)
+        uart_tx_char(suffix);
+    uart_tx_string_P(PSTR("_HUM="));
+    dtostrf(node->hum, 5, 1, buffer);
+    uart_tx_string(buffer);
+    uart_tx_string_P(PSTR(" %RH\r\nEXT"));
+    if(numbered)
+        uart_tx_char(suffix);
+    uart_tx_string_P(PSTR("_PRESS="));
+    dtostrf(node->press, 7, 2, buffer);
+    uart_tx_string(buffer);
+    uart_tx_string_P(PSTR(" hPa\r\nEXT"));
+    if(numbered)
+        uart_tx_char(suffix);
+    uart_tx_string_P(PSTR("_BATTERY="));
+    if(node->battery_mv)
+    {
+        ultoa(node->battery_mv, buffer, 10);
+        uart_tx_string(buffer);
+        uart_tx_string_P(PSTR(" mV\r\nEXT"));
+    }
+    else
+    {
+        uart_tx_string_P(PSTR("NO_DATA\r\nEXT"));
+    }
+    if(numbered)
+        uart_tx_char(suffix);
+    uart_tx_string_P(PSTR("_SEQ="));
+    ultoa(node->seq, buffer, 10);
+    uart_tx_string(buffer);
+    uart_tx_string_P(PSTR("\r\nEXT_BAD="));
+    ultoa(lora_bad, buffer, 10);
+    uart_tx_string(buffer);
+    uart_tx_string_P(PSTR("\r\n"));
 }
 
 // @MCP_ON / @MCP_OFF <pin> | A<pin> | B<pin>
@@ -818,36 +925,15 @@ static void task_serial(void)
             }
             else if(strcmp(rx_buffer,"@GET_EXT") == 0)
             {
-                if(!lora_present)
-                {
-                    uart_tx_string_P(PSTR("LORA_NOT_FOUND\r\n"));
-                }
-                else if(!ext_ok)
-                {
-                    uart_tx_string_P(PSTR("EXT_LINK=NO\r\n"));
-                }
-                else
-                {
-                    uart_tx_string_P(PSTR("EXT_LINK=OK\r\nEXT_AGE="));
-                    ultoa((sched_get_tick() - ext_last) / 1000, buffer, 10);
-                    uart_tx_string(buffer);
-                    uart_tx_string_P(PSTR(" s\r\nEXT_TEMP="));
-                    dtostrf(ext_temp,6,2,buffer);
-                    uart_tx_string(buffer);
-                    uart_tx_string_P(PSTR(" C\r\nEXT_HUM="));
-                    dtostrf(ext_hum,5,1,buffer);
-                    uart_tx_string(buffer);
-                    uart_tx_string_P(PSTR(" %RH\r\nEXT_PRESS="));
-                    dtostrf(ext_press,7,2,buffer);
-                    uart_tx_string(buffer);
-                    uart_tx_string_P(PSTR(" hPa\r\nEXT_SEQ="));
-                    ultoa(lora_seq, buffer, 10);
-                    uart_tx_string(buffer);
-                    uart_tx_string_P(PSTR("\r\nEXT_BAD="));
-                    ultoa(lora_bad, buffer, 10);
-                    uart_tx_string(buffer);
-                    uart_tx_string_P(PSTR("\r\n"));
-                }
+                print_ext_status(0, 0);
+            }
+            else if(strcmp(rx_buffer,"@GET_EXT1") == 0)
+            {
+                print_ext_status(0, 1);
+            }
+            else if(strcmp(rx_buffer,"@GET_EXT2") == 0)
+            {
+                print_ext_status(1, 1);
             }
             else if(strcmp(rx_buffer,"@FORECAST") == 0)
             {

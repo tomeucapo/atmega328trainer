@@ -18,6 +18,10 @@ Remote (`src/lora_remote/CMakeLists.txt`, reuses the shared drivers):
 cd src/lora_remote && cmake -S . -B build && cmake --build build
 ```
 
+Para compilar la segunda remota, usar `-DLORA_NODE_ID=2` y otro directorio
+de build (por ejemplo `cmake -S . -B build_node2 -DLORA_NODE_ID=2` y luego
+`cmake --build build_node2`); la configuración predeterminada es ID 1.
+
 Outputs `firmware.elf` / `firmware.hex` and `firmware_remote.elf` / `firmware_remote.hex` under each `build/` (all `build/` dirs are gitignored; flash targets run `avrdude -c dragon_isp` but `avrdude` is not installed on this machine).
 
 - Requires `gcc-avr`, `avr-libc`, and CMake. On this dev box `avr-libc` is **not** installed system-wide (only `gcc-avr`/`binutils-avr`); the build only links if the libc is reachable. Either `sudo apt install gcc-avr avr-libc`, or point at a local extraction:
@@ -36,10 +40,10 @@ Outputs `firmware.elf` / `firmware.hex` and `firmware_remote.elf` / `firmware_re
 ## Serial protocol / host test
 
 - UART: 9600 8N1 on PD0/PD1 (occupied by the FT232 USB-serial; USB also powers the board, so the hardware UART is not available for RS485/LoRa-UART modules).
-- Commands (CR/LF terminated): `@GET_ANEMO`, `@GET_RAIN`, `@GET_TEMP`, `@RESET_RAIN`, `@DUMP`, `@VIEW`, `@GET_BME`, `@GET_EXT`, `@FORECAST`, `@MCP_ON <pin>`, `@MCP_OFF <pin>`.
-- Replies are plain text lines: `ANEMO=<v> km/h`, `RAIN_COUNT=...`, `RAIN_MM=...`, `TEMP=<v> C`, `TEMP_ERR`, `BME_TEMP=...`, `EXT_LINK=OK/NO`, `EXT_TEMP=...`, `PRED: ...`, `ERR`.
+- Commands (CR/LF terminated): `@GET_ANEMO`, `@GET_RAIN`, `@GET_TEMP`, `@RESET_RAIN`, `@DUMP`, `@VIEW`, `@GET_BME`, `@GET_EXT` (nodo 1), `@GET_EXT1`, `@GET_EXT2`, `@FORECAST`, `@MCP_ON <pin>`, `@MCP_OFF <pin>`.
+- Replies are plain text lines: `ANEMO=<v> km/h`, `RAIN_COUNT=...`, `RAIN_MM=...`, `TEMP=<v> C`, `TEMP_ERR`, `BME_TEMP=...`, `EXT_LINK=OK/NO` (alias for node 1), `EXT1_LINK=OK/NO`, `EXT2_LINK=OK/NO`, `EXT1_BATTERY=... mV`, `EXT2_BATTERY=... mV`, `PRED: ...`, `ERR`.
 - `src/test.py` is a host-side reader against a real board on `/dev/ttyUSB0` (needs `python3-serial`); it polls `@STAT_ANEMO`/`@STAT_RAIN` (legacy names, the firmware answers `@GET_*`).
-- LoRa point-to-point frame (16 B, packed, little-endian): magic `WX`, type 1, version 1, `seq`, `temp_x10`, `hum_x10`, `press_hpa`, `battery_mv`, CRC-16/CCITT. Defined in `lora_proto.h`; the master marks the link down after `LORA_TIMEOUT_MS` (180 s).
+- LoRa point-to-point frame v3 (17 B, packed, little-endian): magic `WX`, type 1, version 3, node ID (1/2), `seq`, `temp_x10`, `hum_x10`, `press_hpa`, `battery_mv`, CRC-16/CCITT. v2 is accepted (node ID present, battery is Vcc and shown as unavailable); legacy v1 is accepted as node 1. Each node has a 180 s timeout. Node 2 starts with a 32 s offset to reduce collisions.
 
 ## Firmware structure and hardware wiring
 
@@ -50,6 +54,7 @@ Outputs `firmware.elf` / `firmware.hex` and `firmware_remote.elf` / `firmware_re
 - `src/weatherstation/eeprom.c` / `.h` — 24LC64 at `0x54`; 24 B record v2: uptime, wind×10, temp×10, rain tips, hum×10, press×10, reserved; magic `0x5A16`.
 - `src/weatherstation/spi.c`, `sx127x.c`, `lora_proto.c` — hardware SPI and minimal SX1276/78 (RFM95W) LoRa driver + CRC protocol.
 - `src/lora_remote/main.c` — remote node: BME280 + SX127x, transmits every ~64 s (watchdog power-down sleep between frames).
+- Remote battery measurement uses PC0/ADC0 and AVCC reference. Add an external divider: VIN--470 kΩ--PC0--330 kΩ--GND, plus 100 nF from PC0 to GND. PC0 is unconnected on the current PCB; route the divider to the ATmega pin 23. The reported VIN calculation assumes AVCC=3.3 V and those divider values; calibrate if better accuracy is needed.
 - I2C bus (PC4/PC5, 100 kHz): MCP23017 `0x20`, SSD1306 `0x3C`, EEPROM `0x54`, BME280 `0x76`.
 - Master pins: PB0 anemometer (ICP1), PB1 rain (PCINT1, NC, 100 ms debounce), PB2 DS18B20 (4.7 kΩ pull-up), PB3/PB4/PB5 SPI (MOSI/MISO/SCK), PC4/PC5 I2C, PD0/PD1 UART, PD2 SX127x CS, PD3 SX127x RESET, PD6 LED.
 - LoRa: RFM95W 868 MHz (UE) or Ra-02 433 MHz (`SX127X_FREQ_HZ`), SF9/BW125/CR4-5/CRC, sync word `0x12`, ~14 dBm. Module is **3.3 V**: the 5 V master needs level shifting and a 3.3 V regulator; keep CS pulled up so ISP programming does not disturb the bus. Remote runs at 3.3 V / 8 MHz (set fuses accordingly).

@@ -22,6 +22,20 @@
 #define TX_PERIOD_S 60
 #define WDT_PERIOD_S 8
 
+// Divisor externo para medir VIN en PC0/ADC0: 470k desde VIN a ADC0,
+// 330k desde ADC0 a GND y 100 nF entre ADC0 y GND.
+#define VIN_DIVIDER_TOP_KOHM 470UL
+#define VIN_DIVIDER_BOTTOM_KOHM 330UL
+#define ADC_REFERENCE_MV 3300UL
+
+#ifndef LORA_NODE_ID
+#define LORA_NODE_ID 1
+#endif
+
+#if LORA_NODE_ID < 1 || LORA_NODE_ID > 2
+#error "LORA_NODE_ID debe ser 1 o 2"
+#endif
+
 #define LED_DDR  DDRB
 #define LED_PORT PORTB
 #define LED_BIT  PB0
@@ -67,30 +81,42 @@ static void sleep_period(void)
         sleep_8s();
 }
 
-// Mide Vcc contra la referencia interna de 1.1 V (sin divisor).
-static uint16_t read_vcc_mv(void)
+// Mide VIN antes del regulador usando PC0/ADC0 y AVCC como referencia.
+static uint16_t read_battery_mv(void)
 {
     uint16_t adc;
+    uint32_t scale_numerator;
+    uint32_t scale_denominator;
 
     power_adc_enable();
 
-    ADMUX = (1 << REFS0) | (1 << MUX3) | (1 << MUX2) | (1 << MUX1);
+    // ADC0, referencia AVCC (3.3 V regulados).
+    ADMUX = (1 << REFS0);
+    DIDR0 |= (1 << ADC0D);
     ADCSRA = (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0);
     _delay_ms(2);
+
+    // Descarta la primera conversion despues de habilitar el ADC.
+    ADCSRA |= (1 << ADSC);
+    while(ADCSRA & (1 << ADSC))
+        ;
+    (void)ADC;
 
     ADCSRA |= (1 << ADSC);
     while(ADCSRA & (1 << ADSC))
         ;
-
     adc = ADC;
     ADCSRA = 0;
 
     power_adc_disable();
 
-    if(adc == 0)
-        return 0;
+    // VIN = ADC * Vref * (Rtop + Rbottom) / (1023 * Rbottom).
+    scale_numerator = ADC_REFERENCE_MV *
+                      (VIN_DIVIDER_TOP_KOHM + VIN_DIVIDER_BOTTOM_KOHM);
+    scale_denominator = 1023UL * VIN_DIVIDER_BOTTOM_KOHM;
 
-    return (uint16_t)(1125300UL / adc);
+    return (uint16_t)(((uint32_t)adc * scale_numerator +
+                       scale_denominator / 2) / scale_denominator);
 }
 
 int main(void)
@@ -127,6 +153,12 @@ int main(void)
 
     sei();
 
+#if LORA_NODE_ID == 2
+    // Desfase inicial de 32 s para reducir colisiones con el nodo 1.
+    for(uint8_t i = 0; i < 4; i++)
+        sleep_8s();
+#endif
+
     while(1)
     {
         bme280_data_t d;
@@ -146,8 +178,8 @@ int main(void)
             hum_x10 = (uint16_t)(d.humidity * 10.0f + 0.5f);
             press_hpa = (uint16_t)(d.pressure + 0.5f);
 
-            lora_build_weather(&frame, seq, temp_x10, hum_x10,
-                               press_hpa, read_vcc_mv());
+            lora_build_weather(&frame, LORA_NODE_ID, seq, temp_x10, hum_x10,
+                               press_hpa, read_battery_mv());
 
             LED_PORT |= (1 << LED_BIT);
             sx127x_send((const uint8_t *)&frame, sizeof(frame));
