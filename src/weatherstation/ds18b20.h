@@ -7,5 +7,6 @@
 
 void ds18b20_init(void);
 float ds18b20_get_temp(void);
+uint8_t ds18b20_get_temp_debug(float *temp, uint8_t *scratchpad);
 
 #endif

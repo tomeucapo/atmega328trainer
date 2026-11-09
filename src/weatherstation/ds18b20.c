@@ -26,35 +26,54 @@ void ds18b20_init(void)
     }
 }
 
-float ds18b20_get_temp(void)
+static uint8_t ds18b20_start_read(void)
 {
-    uint8_t low, high;
-    uint8_t resolution;
-    uint16_t temp_raw;
-    int16_t raw;
-
     if(onewire_reset() != 0)
-        return DS18B20_ERROR_TEMP;
+        return 0;
 
     onewire_write_byte(0xCC); // Skip ROM
     onewire_write_byte(0x44); // Convert T
-
     _delay_ms(DS18B20_CONV_MS);
 
     if(onewire_reset() != 0)
-        return DS18B20_ERROR_TEMP;
+        return 0;
 
     onewire_write_byte(0xCC); // Skip ROM
     onewire_write_byte(0xBE); // Read scratchpad
+    return 1;
+}
 
-    // Solo se necesitan los bytes de temperatura; la resolucion se fija
-    // en ds18b20_init() y determina cuantos bits bajos son indefinidos.
-    low = onewire_read_byte();
-    high = onewire_read_byte();
-    temp_raw = ((uint16_t)high << 8) | low;
-    resolution = (DS18B20_CONFIG >> 5) & 0x03;
+static float ds18b20_decode_temp(uint8_t low, uint8_t high)
+{
+    uint8_t resolution = (DS18B20_CONFIG >> 5) & 0x03;
+    uint16_t temp_raw = ((uint16_t)high << 8) | low;
+    int16_t raw;
+
     temp_raw &= (uint16_t)~((1U << (3 - resolution)) - 1U);
     raw = (int16_t)temp_raw;
-
     return raw * 0.0625f;
+}
+
+float ds18b20_get_temp(void)
+{
+    uint8_t low, high;
+
+    if(!ds18b20_start_read())
+        return DS18B20_ERROR_TEMP;
+
+    low = onewire_read_byte();
+    high = onewire_read_byte();
+    return ds18b20_decode_temp(low, high);
+}
+
+uint8_t ds18b20_get_temp_debug(float *temp, uint8_t *scratchpad)
+{
+    if(!ds18b20_start_read())
+        return 0;
+
+    for(uint8_t i = 0; i < 9; i++)
+        scratchpad[i] = onewire_read_byte();
+
+    *temp = ds18b20_decode_temp(scratchpad[0], scratchpad[1]);
+    return 1;
 }
