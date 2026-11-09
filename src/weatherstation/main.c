@@ -61,6 +61,7 @@ float bme_temp = 0;
 float bme_hum = 0;
 float bme_press = 0;
 uint8_t bme_present = 0;
+static uint8_t bme_data_valid = 0;
 
 // ======================================================
 // NODOS REMOTOS LORA (BME280 en dos ubicaciones)
@@ -426,6 +427,26 @@ void update_oled_graph(void)
     ssd1306_update();
 }
 
+static void draw_oled_temp_line(uint8_t page, const char *label,
+                                float temp, uint8_t valid)
+{
+    char line[24];
+    char value[8];
+
+    strcpy_P(line, label);
+    if(valid)
+    {
+        dtostrf(temp, 4, 1, value);
+        strcat(line, value);
+    }
+    else
+    {
+        strcat_P(line, PSTR("--.-"));
+    }
+    strcat_P(line, PSTR(" C"));
+    ssd1306_draw_string_centered(page, line);
+}
+
 void update_oled(void)
 {
     if(view_mode)
@@ -436,7 +457,6 @@ void update_oled(void)
 
     char line[24] = {0};
     float rain_mm;
-    float tdisp = oled_temp();
 
     ssd1306_clear();
 
@@ -457,16 +477,10 @@ void update_oled(void)
     strcat_P(line, PSTR(" mm"));
     ssd1306_draw_string_centered(3, line);
 
-    ssd1306_draw_string_centered_P(4, PSTR("TEMP"));
-
-    if(tdisp == DS18B20_ERROR_TEMP)
-        ssd1306_draw_string_centered_P(5, PSTR("--.- C"));
-    else
-    {
-        dtostrf(tdisp, 4, 1, line);
-        strcat_P(line, PSTR(" C"));
-        ssd1306_draw_string_centered(5, line);
-    }
+    draw_oled_temp_line(4, PSTR("EXT DS18B20: "), current_temp,
+                        current_temp != DS18B20_ERROR_TEMP);
+    draw_oled_temp_line(5, PSTR("INT BME280: "), bme_temp,
+                        bme_present && bme_data_valid);
 
     print_time(sched_get_tick() / 1000);
     ssd1306_update();
@@ -523,7 +537,10 @@ static void task_sensors(void)
                 bme_temp = bd.temperature;
                 bme_hum = bd.humidity;
                 bme_press = bd.pressure;
+                bme_data_valid = 1;
             }
+            else
+                bme_data_valid = 0;
         }
     }
 
