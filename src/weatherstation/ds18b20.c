@@ -54,16 +54,37 @@ static float ds18b20_decode_temp(uint8_t low, uint8_t high)
     return raw * 0.0625f;
 }
 
+static uint8_t ds18b20_crc8(const uint8_t *data, uint8_t len)
+{
+    uint8_t crc = 0;
+
+    while(len--)
+    {
+        uint8_t value = *data++;
+
+        for(uint8_t i = 0; i < 8; i++)
+        {
+            uint8_t mix = (crc ^ value) & 0x01;
+            crc >>= 1;
+            if(mix)
+                crc ^= 0x8C;
+            value >>= 1;
+        }
+    }
+
+    return crc;
+}
+
 float ds18b20_get_temp(void)
 {
-    uint8_t low, high;
+    uint8_t scratchpad[9];
+    float temp;
 
-    if(!ds18b20_start_read())
+    if(!ds18b20_get_temp_debug(&temp, scratchpad) ||
+       !ds18b20_scratchpad_crc_ok(scratchpad))
         return DS18B20_ERROR_TEMP;
 
-    low = onewire_read_byte();
-    high = onewire_read_byte();
-    return ds18b20_decode_temp(low, high);
+    return temp;
 }
 
 uint8_t ds18b20_get_temp_debug(float *temp, uint8_t *scratchpad)
@@ -76,4 +97,9 @@ uint8_t ds18b20_get_temp_debug(float *temp, uint8_t *scratchpad)
 
     *temp = ds18b20_decode_temp(scratchpad[0], scratchpad[1]);
     return 1;
+}
+
+uint8_t ds18b20_scratchpad_crc_ok(const uint8_t *scratchpad)
+{
+    return (uint8_t)(ds18b20_crc8(scratchpad, 8) == scratchpad[8]);
 }

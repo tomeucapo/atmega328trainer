@@ -914,7 +914,10 @@ static void task_serial(void)
                     uart_tx_string_P(PSTR("DS18B20_TEMP="));
                     dtostrf(temp, 6, 1, buffer);
                     uart_tx_string(buffer);
-                    uart_tx_string_P(PSTR(" C\r\nDS18B20_SCRATCHPAD="));
+                    uart_tx_string_P(PSTR(" C\r\nDS18B20_CRC="));
+                    uart_tx_string_P(ds18b20_scratchpad_crc_ok(scratchpad)
+                                     ? PSTR("OK\r\nDS18B20_SCRATCHPAD=")
+                                     : PSTR("ERR\r\nDS18B20_SCRATCHPAD="));
 
                     for(uint8_t i = 0; i < 9; i++)
                     {
