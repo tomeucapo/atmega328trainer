@@ -827,13 +827,6 @@ static uint8_t handle_mcp_cmd(const char *arg, uint8_t value)
     return 1;
 }
 
-static void uart_tx_hex_byte(uint8_t value)
-{
-    static const char hex[] PROGMEM = "0123456789ABCDEF";
-    uart_tx_char(pgm_read_byte(&hex[value >> 4]));
-    uart_tx_char(pgm_read_byte(&hex[value & 0x0F]));
-}
-
 // UART: procesa los comandos serie terminados en CR/LF.
 static void task_serial(void)
 {
@@ -898,34 +891,6 @@ static void task_serial(void)
                     dtostrf(temp,6,3,buffer);
                     uart_tx_string(buffer);
                     uart_tx_string_P(PSTR(" C\r\n"));
-                }
-            }
-            else if(strcmp(rx_buffer,"@DEBUG_TEMP") == 0)
-            {
-                uint8_t scratchpad[9];
-                float temp;
-
-                if(!ds18b20_get_temp_debug(&temp, scratchpad))
-                {
-                    uart_tx_string_P(PSTR("DS18B20 NO PRESENCE\r\n"));
-                }
-                else
-                {
-                    uart_tx_string_P(PSTR("DS18B20_TEMP="));
-                    dtostrf(temp, 6, 1, buffer);
-                    uart_tx_string(buffer);
-                    uart_tx_string_P(PSTR(" C\r\nDS18B20_CRC="));
-                    uart_tx_string_P(ds18b20_scratchpad_crc_ok(scratchpad)
-                                     ? PSTR("OK\r\nDS18B20_SCRATCHPAD=")
-                                     : PSTR("ERR\r\nDS18B20_SCRATCHPAD="));
-
-                    for(uint8_t i = 0; i < 9; i++)
-                    {
-                        if(i)
-                            uart_tx_char(' ');
-                        uart_tx_hex_byte(scratchpad[i]);
-                    }
-                    uart_tx_string_P(PSTR("\r\n"));
                 }
             }
             else if(strcmp(rx_buffer,"@RESET_RAIN") == 0)
