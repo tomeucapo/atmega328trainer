@@ -4,7 +4,9 @@ Firmware and KiCad designs for an ATmega328P weather station and its battery-pow
 
 The original trainer board includes an optocoupled input for pulse sensors, including 24 V anemometers, and an FT232 USB-to-serial interface.
 
-<img src="images/board.jpg" alt="ATmega328P weather station board" width="400">
+| Weather station board | IO Expansion board |
+| --- | --- |
+| <img src="images/board.jpg" alt="ATmega328P weather station board" width="400"> | <img src="images/io_expansion.jpg" alt="IO Expansion board" width="400"> |
 
 [PCB project page](https://www.pcbway.com/project/shareproject/Anemometer_with_ATMega128P_fbefd825.html) · [Master schematic (PDF)](schematic/anemometre.pdf) · [IOExtension schematic (PDF)](schematic/IOExtension/IOExtension/IOExtension.pdf) · [Local LoRa/BME280 schematic (PDF)](schematic/lora_bme280_local/lora_bme280_local/lora_bme280_local.pdf)
 
