@@ -4,10 +4,17 @@
 
 void mcp23017_write_reg(uint8_t reg, uint8_t value)
 {
-    twi_start();
-    twi_write_byte(MCP23017_I2C_ADDR << 1); // modo escritura
-    twi_write_byte(reg);
-    twi_write_byte(value);
+    if(twi_start())
+        return;
+
+    if(twi_write_byte(MCP23017_I2C_ADDR << 1) || // modo escritura
+       twi_write_byte(reg) ||
+       twi_write_byte(value))
+    {
+        twi_stop();
+        return;
+    }
+
     twi_stop();
 }
 
@@ -15,13 +22,23 @@ uint8_t mcp23017_read_reg(uint8_t reg)
 {
     uint8_t value = 0;
 
-    twi_start();
-    twi_write_byte(MCP23017_I2C_ADDR << 1); // modo escritura
-    twi_write_byte(reg);
+    if(twi_start())
+        return 0;
 
-    twi_restart();
-    twi_write_byte((MCP23017_I2C_ADDR << 1) | 0x01); // modo lectura
-    twi_read_nack(&value);
+    if(twi_write_byte(MCP23017_I2C_ADDR << 1) || // modo escritura
+       twi_write_byte(reg))
+    {
+        twi_stop();
+        return 0;
+    }
+
+    if(twi_restart() ||
+       twi_write_byte((MCP23017_I2C_ADDR << 1) | 0x01) || // modo lectura
+       twi_read_nack(&value))
+    {
+        twi_stop();
+        return 0;
+    }
 
     twi_stop();
 

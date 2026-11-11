@@ -1,0 +1,302 @@
+#ifndef F_CPU
+#define F_CPU 8000000UL
+#endif
+
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <avr/power.h>
+#include <avr/sleep.h>
+#include <avr/wdt.h>
+#include <util/delay.h>
+#include <stdlib.h>
+#include <avr/pgmspace.h>
+#include "twi.h"
+#include "bme280.h"
+#include "sx127x.h"
+#include "lora_proto.h"
+
+#ifndef LORA_DEBUG_UART
+#define LORA_DEBUG_UART 0
+#endif
+
+// ======================================================
+// NODO REMOTO LORA: BME280 (temperatura/humedad/presion)
+// ATmega328P a 3.3 V / 8 MHz (RC interno o cristal de 8 MHz).
+// Duerme entre transmisiones para ahorrar bateria.
+// ======================================================
+
+#define TX_PERIOD_S 60
+#define WDT_PERIOD_S 8
+
+// Divisor externo para medir VIN en PC0/ADC0: 470k desde VIN a ADC0,
+// 330k desde ADC0 a GND y 100 nF entre ADC0 y GND.
+#define VIN_DIVIDER_TOP_KOHM 470UL
+#define VIN_DIVIDER_BOTTOM_KOHM 330UL
+#define ADC_REFERENCE_MV 3300UL
+
+#ifndef LORA_NODE_ID
+#define LORA_NODE_ID 1
+#endif
+
+#if LORA_NODE_ID < 1 || LORA_NODE_ID > 2
+#error "LORA_NODE_ID debe ser 1 o 2"
+#endif
+
+#define LED_DDR  DDRB
+#define LED_PORT PORTB
+#define LED_BIT  PB0
+
+#if LORA_DEBUG_UART
+#define DEBUG_UART_BAUD 9600UL
+#define DEBUG_UART_UBRR ((F_CPU / (16UL * DEBUG_UART_BAUD)) - 1UL)
+
+static void debug_uart_init(void)
+{
+    DDRD |= (1 << DDD1); // PD1/TXD
+    UBRR0H = (uint8_t)(DEBUG_UART_UBRR >> 8);
+    UBRR0L = (uint8_t)DEBUG_UART_UBRR;
+    UCSR0A = 0;
+    UCSR0B = (1 << TXEN0); // Solo transmision; no se usa RX
+    UCSR0C = (1 << UCSZ01) | (1 << UCSZ00); // 8N1
+}
+
+static void debug_uart_char(char c)
+{
+    while(!(UCSR0A & (1 << UDRE0)))
+        ;
+    UDR0 = c;
+}
+
+static void debug_uart_string(const char *s)
+{
+    while(*s)
+        debug_uart_char(*s++);
+}
+
+static void debug_uart_string_P(const char *s)
+{
+    char c;
+
+    while((c = (char)pgm_read_byte(s++)) != '\0')
+        debug_uart_char(c);
+}
+
+static void debug_uart_u16(uint16_t value)
+{
+    char buf[6];
+    utoa(value, buf, 10);
+    debug_uart_string(buf);
+}
+
+static void debug_uart_float(float value, uint8_t precision)
+{
+    char buf[16];
+    dtostrf(value, 1, precision, buf);
+    debug_uart_string(buf);
+}
+#endif
+
+ISR(WDT_vect)
+{
+    // Solo despierta del power-down.
+}
+
+static void led_blink(uint8_t n)
+{
+    LED_DDR |= (1 << LED_BIT);
+
+    while(n--)
+    {
+        LED_PORT |= (1 << LED_BIT);
+        _delay_ms(40);
+        LED_PORT &= (uint8_t)~(1 << LED_BIT);
+        _delay_ms(160);
+    }
+}
+
+static void sleep_8s(void)
+{
+    cli();
+    wdt_reset();
+
+    // Secuencia temporizada: WDIE solo (interrupcion, sin reset).
+    WDTCSR = (1 << WDCE) | (1 << WDE);
+    WDTCSR = (1 << WDIE) | (1 << WDP3) | (1 << WDP0);
+
+    set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+    sleep_enable();
+    sei();
+    sleep_cpu();
+    sleep_disable();
+    wdt_disable();
+}
+
+static void sleep_period(void)
+{
+    for(uint8_t i = 0; i < (TX_PERIOD_S + WDT_PERIOD_S - 1) / WDT_PERIOD_S; i++)
+        sleep_8s();
+}
+
+// Mide VIN antes del regulador usando PC0/ADC0 y AVCC como referencia.
+static uint16_t read_battery_mv(void)
+{
+    uint16_t adc;
+    uint32_t scale_numerator;
+    uint32_t scale_denominator;
+
+    power_adc_enable();
+
+    // ADC0, referencia AVCC (3.3 V regulados).
+    ADMUX = (1 << REFS0);
+    DIDR0 |= (1 << ADC0D);
+    ADCSRA = (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0);
+    _delay_ms(2);
+
+    // Descarta la primera conversion despues de habilitar el ADC.
+    ADCSRA |= (1 << ADSC);
+    while(ADCSRA & (1 << ADSC))
+        ;
+    (void)ADC;
+
+    ADCSRA |= (1 << ADSC);
+    while(ADCSRA & (1 << ADSC))
+        ;
+    adc = ADC;
+    ADCSRA = 0;
+
+    power_adc_disable();
+
+    // VIN = ADC * Vref * (Rtop + Rbottom) / (1023 * Rbottom).
+    scale_numerator = ADC_REFERENCE_MV *
+                      (VIN_DIVIDER_TOP_KOHM + VIN_DIVIDER_BOTTOM_KOHM);
+    scale_denominator = 1023UL * VIN_DIVIDER_BOTTOM_KOHM;
+
+    return (uint16_t)(((uint32_t)adc * scale_numerator +
+                       scale_denominator / 2) / scale_denominator);
+}
+
+int main(void)
+{
+    uint16_t seq = 0;
+
+    // El nodo solo usa UART cuando se compila con debug; nunca usa timers.
+#if !LORA_DEBUG_UART
+    power_usart0_disable();
+#else
+    debug_uart_init();
+    debug_uart_string_P(PSTR("LoRa remote boot, node="));
+    debug_uart_u16(LORA_NODE_ID);
+    debug_uart_string_P(PSTR("\r\n"));
+#endif
+    power_timer0_disable();
+    power_timer1_disable();
+    power_timer2_disable();
+
+    LED_DDR |= (1 << LED_BIT);
+
+    twi_bus_recover();
+    _delay_ms(50);
+    twi_init();
+
+    // BME280: si no responde, reintenta (el sensor puede arrancar
+    // despues que el MCU).
+    while(!bme280_init())
+    {
+#if LORA_DEBUG_UART
+        debug_uart_string_P(PSTR("ERROR: BME280 init; retry\r\n"));
+#endif
+        led_blink(2);
+        _delay_ms(500);
+    }
+#if LORA_DEBUG_UART
+    debug_uart_string_P(PSTR("BME280 OK\r\n"));
+#endif
+    bme280_sleep();
+
+    // SX127x: idem.
+    while(!sx127x_init())
+    {
+#if LORA_DEBUG_UART
+        debug_uart_string_P(PSTR("ERROR: SX127x init; retry\r\n"));
+#endif
+        led_blink(3);
+        _delay_ms(500);
+    }
+#if LORA_DEBUG_UART
+    debug_uart_string_P(PSTR("SX127x OK\r\n"));
+#endif
+
+    sei();
+
+#if LORA_NODE_ID == 2
+    // Desfase inicial de 32 s para reducir colisiones con el nodo 1.
+#if LORA_DEBUG_UART
+    debug_uart_string_P(PSTR("Initial TX offset: 32 s\r\n"));
+#endif
+    for(uint8_t i = 0; i < 4; i++)
+        sleep_8s();
+#endif
+
+    while(1)
+    {
+        bme280_data_t d;
+        lora_weather_t frame;
+
+        if(bme280_forced_read(&d) == 0)
+        {
+            int16_t temp_x10;
+            uint16_t hum_x10;
+            uint16_t press_hpa;
+            uint16_t battery_mv;
+            uint8_t tx_ok;
+
+            if(d.temperature >= 0.0f)
+                temp_x10 = (int16_t)(d.temperature * 10.0f + 0.5f);
+            else
+                temp_x10 = (int16_t)(d.temperature * 10.0f - 0.5f);
+
+            hum_x10 = (uint16_t)(d.humidity * 10.0f + 0.5f);
+            press_hpa = (uint16_t)(d.pressure + 0.5f);
+
+            battery_mv = read_battery_mv();
+            lora_build_weather(&frame, LORA_NODE_ID, seq, temp_x10, hum_x10,
+                               press_hpa, battery_mv);
+
+#if LORA_DEBUG_UART
+            debug_uart_string_P(PSTR("DATA seq="));
+            debug_uart_u16(seq);
+            debug_uart_string_P(PSTR(" T="));
+            debug_uart_float(d.temperature, 2);
+            debug_uart_string_P(PSTR("C H="));
+            debug_uart_float(d.humidity, 1);
+            debug_uart_string_P(PSTR("% P="));
+            debug_uart_float(d.pressure, 1);
+            debug_uart_string_P(PSTR("hPa VIN="));
+            debug_uart_u16(battery_mv);
+            debug_uart_string_P(PSTR("mV\r\nTX..."));
+#endif
+
+            LED_PORT |= (1 << LED_BIT);
+            tx_ok = sx127x_send((const uint8_t *)&frame, sizeof(frame));
+            LED_PORT &= (uint8_t)~(1 << LED_BIT);
+
+#if LORA_DEBUG_UART
+            debug_uart_string_P(tx_ok ? PSTR(" OK\r\n") : PSTR(" TIMEOUT\r\n"));
+#else
+            (void)tx_ok;
+#endif
+
+            seq++;
+        }
+        else
+        {
+#if LORA_DEBUG_UART
+            debug_uart_string_P(PSTR("ERROR: BME280 read\r\n"));
+#endif
+            led_blink(1);
+        }
+
+        sx127x_sleep();
+        sleep_period();
+    }
+}

@@ -24,6 +24,10 @@ void ssd1306_draw_char(uint8_t col, uint8_t page, char c);
 void ssd1306_draw_string(uint8_t page, uint8_t col, const char *s);
 void ssd1306_draw_string_centered(uint8_t page, const char *s);
 
+// Variantes para cadenas en flash (PSTR()).
+void ssd1306_draw_string_P(uint8_t page, uint8_t col, const char *s);
+void ssd1306_draw_string_centered_P(uint8_t page, const char *s);
+
 // Envia a la pantalla solo las paginas cuyo contenido cambio.
 void ssd1306_update(void);
 

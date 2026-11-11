@@ -1,6 +1,7 @@
 #include "uart.h"
 #include <avr/io.h>
 #include <avr/interrupt.h>
+#include <avr/pgmspace.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -59,6 +60,14 @@ void uart_tx_string(const char* s)
         uart_tx_char(*s++);
 }
 
+void uart_tx_string_P(const char* s)
+{
+    char c;
+
+    while((c = (char)pgm_read_byte(s++)) != '\0')
+        uart_tx_char(c);
+}
+
 uint8_t uart_rx_available(void)
 {
     return (uint8_t)((rx_head - rx_tail) & (UART_RX_BUF_SIZE - 1));
@@ -101,19 +110,19 @@ void uart_tx_uint32(uint32_t v)
 
 void uart_tx_time(uint32_t seconds)
 {
-    char line[8]={0};
+    char line[12]={0};
 
-    char hours[2]={0};
+    char hours[4]={0};
     ultoa((seconds/60/60)%24, hours, 10);
     strcat(line, hours);
     strcat(line, ":");
     
-    char minutes[2]={0};
+    char minutes[4]={0};
     ultoa((seconds/60)%60, minutes, 10);
     strcat(line, minutes);
     strcat(line, ":");
     
-    char seconds_str[2]={0};
+    char seconds_str[4]={0};
     ultoa(seconds%60, seconds_str, 10);
     strcat(line, seconds_str);
 

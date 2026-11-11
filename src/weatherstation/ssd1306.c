@@ -121,15 +121,19 @@ static const uint8_t font5x7[96][5] PROGMEM = {
 // Devuelve 1 si el SSD1306 ha reconocido el comando (ACK).
 static uint8_t ssd1306_cmd(uint8_t cmd)
 {
-    uint8_t ok = 1;
+    if(twi_start())
+        return 0;
 
-    twi_start();
-    ok &= (uint8_t)(twi_write_byte(SSD1306_I2C_ADDR << 1) == 0);
-    ok &= (uint8_t)(twi_write_byte(SSD1306_COMMAND) == 0);
-    ok &= (uint8_t)(twi_write_byte(cmd) == 0);
+    if(twi_write_byte(SSD1306_I2C_ADDR << 1) ||
+       twi_write_byte(SSD1306_COMMAND) ||
+       twi_write_byte(cmd))
+    {
+        twi_stop();
+        return 0;
+    }
+
     twi_stop();
-
-    return ok;
+    return 1;
 }
 
 // Selecciona la pagina y vuelve a la columna 0 (modo paginado)
@@ -243,6 +247,27 @@ void ssd1306_draw_string_centered(uint8_t page, const char *s)
     ssd1306_draw_string(page, (SSD1306_WIDTH - width) / 2, s);
 }
 
+void ssd1306_draw_string_P(uint8_t page, uint8_t col, const char *s)
+{
+    char c;
+
+    while((c = (char)pgm_read_byte(s++)) != '\0' && col <= SSD1306_WIDTH - 6)
+    {
+        ssd1306_draw_char(col, page, c);
+        col += 6;
+    }
+}
+
+void ssd1306_draw_string_centered_P(uint8_t page, const char *s)
+{
+    uint16_t width = strlen_P(s) * 6;
+
+    if(width > SSD1306_WIDTH)
+        width = SSD1306_WIDTH;
+
+    ssd1306_draw_string_P(page, (SSD1306_WIDTH - width) / 2, s);
+}
+
 void ssd1306_update(void)
 {
     for(uint8_t page = 0; page < SSD1306_PAGES; page++)
@@ -258,13 +283,24 @@ void ssd1306_update(void)
             continue;
 
         ok = ssd1306_set_page(page);
+        if(!ok || twi_start())
+            continue;
 
-        twi_start();
-        ok &= (uint8_t)(twi_write_byte(SSD1306_I2C_ADDR << 1) == 0);
-        ok &= (uint8_t)(twi_write_byte(SSD1306_DATA) == 0);
+        if(twi_write_byte(SSD1306_I2C_ADDR << 1) ||
+           twi_write_byte(SSD1306_DATA))
+        {
+            twi_stop();
+            continue;
+        }
 
         for(uint8_t i = 0; i < SSD1306_WIDTH; i++)
-            ok &= (uint8_t)(twi_write_byte(cur[i]) == 0);
+        {
+            if(twi_write_byte(cur[i]))
+            {
+                ok = 0;
+                break;
+            }
+        }
 
         twi_stop();
 
