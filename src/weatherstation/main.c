@@ -21,6 +21,7 @@
 #include "prediction.h"
 #include "sx127x.h"
 #include "lora_proto.h"
+#include "serial_commands.h"
 
 // ======================================================
 // CONFIG
@@ -247,37 +248,6 @@ void calculate_anemo_velocity()
 void io_init(void)
 {
     DDRD = (1<<DDD5) | (1<<DDD6) | (1<<DDD7);
-}
-
-// ======================================================
-// MCP23017 COMANDOS SERIE
-// ======================================================
-
-static uint8_t parse_mcp_pin(const char *s, uint8_t *pin)
-{
-    uint8_t value = 0;
-
-    while(*s == ' ')
-        s++;
-
-    if(*s < '0' || *s > '9')
-        return 0;
-
-    while(*s >= '0' && *s <= '9')
-    {
-        value = value * 10 + (*s - '0');
-
-        if(value > 7)
-            return 0;
-
-        s++;
-    }
-
-    if(*s != '\0')
-        return 0;
-
-    *pin = value;
-    return 1;
 }
 
 // ======================================================
@@ -776,212 +746,6 @@ static void print_ext_status(uint8_t index, uint8_t numbered)
     uart_tx_string_P(PSTR("\r\n"));
 }
 
-// @MCP_ON / @MCP_OFF <pin> | A<pin> | B<pin>
-// Puerto por defecto A; el pin GPA7 esta reservado (pulsador a masa).
-// Devuelve 1 si aplico el cambio, 0 (con ERR) si el pin no es valido.
-static uint8_t handle_mcp_cmd(const char *arg, uint8_t value)
-{
-    char buffer[8];
-    char port;
-    uint8_t pin;
-
-    while(*arg == ' ')
-        arg++;
-
-    if(*arg == 'B' || *arg == 'b')
-    {
-        port = 'B';
-        arg++;
-    }
-    else
-    {
-        port = 'A';
-
-        if(*arg == 'A' || *arg == 'a')
-            arg++;
-    }
-
-    if(!parse_mcp_pin(arg, &pin) ||
-       (port == 'A' && pin == BTN_MCP_PIN))
-    {
-        uart_tx_string_P(PSTR("ERR\r\n"));
-        return 0;
-    }
-
-    mcp23017_write_pin(port == 'B' ? MCP23017_PORTB : MCP23017_PORTA,
-                       pin, value);
-
-    if(value)
-        uart_tx_string_P(PSTR("MCP_ON="));
-    else
-        uart_tx_string_P(PSTR("MCP_OFF="));
-
-    buffer[0] = port;
-    buffer[1] = 0;
-    uart_tx_string(buffer);
-
-    utoa(pin, buffer, 10);
-    uart_tx_string(buffer);
-    uart_tx_string_P(PSTR("\r\n"));
-
-    return 1;
-}
-
-// UART: procesa los comandos serie terminados en CR/LF.
-static void task_serial(void)
-{
-    static char buffer[32];
-    static char rx_buffer[32];
-    static uint8_t rx_index = 0;
-
-    while(uart_rx_available())
-    {
-        char c = uart_rx_read();
-
-        uart_tx_char(c);
-
-        if(c == '\r' || c == '\n')
-        {
-            rx_buffer[rx_index] = 0;
-            rx_index = 0;
-
-            if(strcmp(rx_buffer,"@GET_ANEMO") == 0)
-            {
-                dtostrf(velocidad,6,3,buffer);
-
-                uart_tx_string_P(PSTR("ANEMO="));
-                uart_tx_string(buffer);
-                uart_tx_string_P(PSTR(" km/h\r\n"));
-            }
-            else if(strcmp(rx_buffer,"@GET_RAIN") == 0)
-            {
-                uint32_t count;
-                float mm;
-
-                cli();
-                count = rain_count;
-                sei();
-                mm = count * RAIN_MM_PER_TIP;
-
-                uart_tx_string_P(PSTR("RAIN_COUNT="));
-
-                ultoa(count,buffer,10);
-                uart_tx_string(buffer);
-
-                uart_tx_string_P(PSTR("\r\n"));
-
-                uart_tx_string_P(PSTR("RAIN_MM="));
-
-                dtostrf(mm,6,2,buffer);
-                uart_tx_string(buffer);
-
-                uart_tx_string_P(PSTR("\r\n"));
-            }
-            else if(strcmp(rx_buffer,"@GET_TEMP") == 0)
-            {
-                float temp = ds18b20_get_temp();
-
-                if(temp == DS18B20_ERROR_TEMP)
-                {
-                    uart_tx_string_P(PSTR("TEMP_ERR\r\n"));
-                }
-                else
-                {
-                    uart_tx_string_P(PSTR("TEMP="));
-                    dtostrf(temp,6,3,buffer);
-                    uart_tx_string(buffer);
-                    uart_tx_string_P(PSTR(" C\r\n"));
-                }
-            }
-            else if(strcmp(rx_buffer,"@RESET_RAIN") == 0)
-            {
-                cli();
-                rain_count = 0;
-                sei();
-
-                uart_tx_string_P(PSTR("RAIN RESET OK\r\n"));
-            }
-            else if(strcmp(rx_buffer,"@DUMP") == 0)
-            {
-                eeprom_dump();
-            }
-            else if(strcmp(rx_buffer,"@VIEW") == 0)
-            {
-                view_mode ^= 1;
-
-                if(view_mode)
-                    uart_tx_string_P(PSTR("VIEW=GRAPH\r\n"));
-                else
-                    uart_tx_string_P(PSTR("VIEW=TEXT\r\n"));
-            }
-            else if(strcmp(rx_buffer,"@GET_BME") == 0)
-            {
-                if(!bme_present)
-                {
-                    uart_tx_string_P(PSTR("BME280_NOT_FOUND\r\n"));
-                }
-                else
-                {
-                    char pb[16];
-                    uart_tx_string_P(PSTR("BME_TEMP="));
-                    dtostrf(bme_temp,6,2,pb);
-                    uart_tx_string(pb);
-                    uart_tx_string_P(PSTR(" C\r\nBME_HUM="));
-                    dtostrf(bme_hum,5,1,pb);
-                    uart_tx_string(pb);
-                    uart_tx_string_P(PSTR(" %RH\r\nBME_PRESS="));
-                    dtostrf(bme_press,7,2,pb);
-                    uart_tx_string(pb);
-                    uart_tx_string_P(PSTR(" hPa\r\n"));
-                    float dp = pred_dewpoint(bme_temp > -50 ? bme_temp : current_temp, bme_hum);
-                    uart_tx_string_P(PSTR("DEWPOINT="));
-                    dtostrf(dp,6,2,pb);
-                    uart_tx_string(pb);
-                    uart_tx_string_P(PSTR(" C\r\n"));
-                }
-            }
-            else if(strcmp(rx_buffer,"@GET_EXT") == 0)
-            {
-                print_ext_status(0, 0);
-            }
-            else if(strcmp(rx_buffer,"@GET_EXT1") == 0)
-            {
-                print_ext_status(0, 1);
-            }
-            else if(strcmp(rx_buffer,"@GET_EXT2") == 0)
-            {
-                print_ext_status(1, 1);
-            }
-            else if(strcmp(rx_buffer,"@FORECAST") == 0)
-            {
-                char fbuf[48];
-                pred_forecast(fbuf, sizeof(fbuf));
-                uart_tx_string(fbuf);
-                uart_tx_string_P(PSTR("\r\n"));
-            }
-            else if(strncmp(rx_buffer,"@MCP_ON",7) == 0)
-            {
-                handle_mcp_cmd(rx_buffer + 7, 1);
-            }
-            else if(strncmp(rx_buffer,"@MCP_OFF",8) == 0)
-            {
-                handle_mcp_cmd(rx_buffer + 8, 0);
-            }
-            else
-            {
-                uart_tx_string_P(PSTR("ERR\r\n"));
-            }
-        }
-        else
-        {
-            if(rx_index < sizeof(rx_buffer)-1)
-            {
-                rx_buffer[rx_index++] = c;
-            }
-        }
-    }
-}
-
 // Tabla de tareas: { funcion, periodo_ms, desfase_ms }. El desfase
 // de task_sensors evita que su lectura bloqueante coincida con el
 // refresco de la pantalla.
@@ -1017,6 +781,19 @@ void welcome(void)
 int main(void)
 {
     uint8_t i;
+    static serial_command_context_t serial_context;
+
+    serial_context.rain_count = &rain_count;
+    serial_context.wind_speed = &velocidad;
+    serial_context.current_temp = &current_temp;
+    serial_context.bme_temp = &bme_temp;
+    serial_context.bme_hum = &bme_hum;
+    serial_context.bme_press = &bme_press;
+    serial_context.bme_present = &bme_present;
+    serial_context.view_mode = &view_mode;
+    serial_context.mcp_reserved_pin = BTN_MCP_PIN;
+    serial_context.print_ext_status = print_ext_status;
+    serial_commands_init(&serial_context);
 
     io_init();
     uart_init();
