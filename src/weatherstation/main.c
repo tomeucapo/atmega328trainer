@@ -286,21 +286,21 @@ static uint8_t parse_mcp_pin(const char *s, uint8_t *pin)
 
 void print_time(uint32_t seconds)
 {
-    char line[24]={0};
+    char line[16];
+    uint8_t pos;
+    uint8_t minutes = (uint8_t)((seconds / 60UL) % 60UL);
+    uint8_t secs = (uint8_t)(seconds % 60UL);
 
-    char hours[4]={0};
-    ultoa((seconds/60/60)%24, hours, 10);
-    strcat(line, hours);
-    strcat(line, ":");
-    
-    char minutes[4]={0};
-    ultoa((seconds/60)%60, minutes, 10);
-    strcat(line, minutes);
-    strcat(line, ":");
-    
-    char seconds_str[4]={0};
-    ultoa(seconds%60, seconds_str, 10);
-    strcat(line, seconds_str);
+    // Es uptime, no hora del dia: las horas siguen acumulandose despues de 24.
+    ultoa(seconds / 3600UL, line, 10);
+    pos = (uint8_t)strlen(line);
+    line[pos++] = ':';
+    line[pos++] = (char)('0' + minutes / 10);
+    line[pos++] = (char)('0' + minutes % 10);
+    line[pos++] = ':';
+    line[pos++] = (char)('0' + secs / 10);
+    line[pos++] = (char)('0' + secs % 10);
+    line[pos] = '\0';
 
     ssd1306_draw_string(7, 1, line);
 }
