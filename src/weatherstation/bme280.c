@@ -75,35 +75,57 @@ static uint8_t bme280_write_reg(uint8_t reg, uint8_t val)
     return 0;
 }
 
-static void bme280_read_calibration(void)
+static uint16_t bme280_u16_le(uint8_t lsb, uint8_t msb)
+{
+    return (uint16_t)(((uint16_t)msb << 8) | lsb);
+}
+
+static int16_t bme280_s16_le(uint8_t lsb, uint8_t msb)
+{
+    return (int16_t)bme280_u16_le(lsb, msb);
+}
+
+static int16_t bme280_s12(uint16_t value)
+{
+    if(value & 0x0800)
+        value |= 0xF000;
+    return (int16_t)value;
+}
+
+static uint8_t bme280_read_calibration(void)
 {
     uint8_t cal[26];
     uint8_t h1;
-    
-    bme280_read_regs(BME280_REG_CALIB00, cal, 24);
-    
-    dig_T1 = (uint16_t)(cal[0] | (cal[1] << 8));
-    dig_T2 = (int16_t)(cal[2] | (cal[3] << 8));
-    dig_T3 = (int16_t)(cal[4] | (cal[5] << 8));
-    dig_P1 = (uint16_t)(cal[6] | (cal[7] << 8));
-    dig_P2 = (int16_t)(cal[8] | (cal[9] << 8));
-    dig_P3 = (int16_t)(cal[10] | (cal[11] << 8));
-    dig_P4 = (int16_t)(cal[12] | (cal[13] << 8));
-    dig_P5 = (int16_t)(cal[14] | (cal[15] << 8));
-    dig_P6 = (int16_t)(cal[16] | (cal[17] << 8));
-    dig_P7 = (int16_t)(cal[18] | (cal[19] << 8));
-    dig_P8 = (int16_t)(cal[20] | (cal[21] << 8));
-    dig_P9 = (int16_t)(cal[22] | (cal[23] << 8));
-    
-    bme280_read_reg(BME280_REG_CALIB25, &h1);
+
+    if(bme280_read_regs(BME280_REG_CALIB00, cal, 24))
+        return 1;
+
+    dig_T1 = bme280_u16_le(cal[0], cal[1]);
+    dig_T2 = bme280_s16_le(cal[2], cal[3]);
+    dig_T3 = bme280_s16_le(cal[4], cal[5]);
+    dig_P1 = bme280_u16_le(cal[6], cal[7]);
+    dig_P2 = bme280_s16_le(cal[8], cal[9]);
+    dig_P3 = bme280_s16_le(cal[10], cal[11]);
+    dig_P4 = bme280_s16_le(cal[12], cal[13]);
+    dig_P5 = bme280_s16_le(cal[14], cal[15]);
+    dig_P6 = bme280_s16_le(cal[16], cal[17]);
+    dig_P7 = bme280_s16_le(cal[18], cal[19]);
+    dig_P8 = bme280_s16_le(cal[20], cal[21]);
+    dig_P9 = bme280_s16_le(cal[22], cal[23]);
+
+    if(bme280_read_reg(BME280_REG_CALIB25, &h1))
+        return 1;
     dig_H1 = h1;
-    
-    bme280_read_regs(BME280_REG_CALIB26, cal, 7);
-    dig_H2 = (int16_t)(cal[0] | (cal[1] << 8));
+
+    if(bme280_read_regs(BME280_REG_CALIB26, cal, 7))
+        return 1;
+    dig_H2 = bme280_s16_le(cal[0], cal[1]);
     dig_H3 = cal[2];
-    dig_H4 = (int16_t)((cal[3] << 4) | (cal[4] & 0x0F));
-    dig_H5 = (int16_t)((cal[5] << 4) | (cal[4] >> 4));
+    dig_H4 = bme280_s12(((uint16_t)cal[3] << 4) | (cal[4] & 0x0F));
+    dig_H5 = bme280_s12(((uint16_t)cal[5] << 4) | (cal[4] >> 4));
     dig_H6 = (int8_t)cal[6];
+
+    return 0;
 }
 
 static int32_t bme280_compensate_temp(int32_t adc_T)
@@ -153,17 +175,17 @@ uint8_t bme280_init(void)
     if(bme280_read_reg(BME280_REG_ID, &id)) return 0;
     if(id != 0x60) return 0;
     
-    bme280_write_reg(BME280_REG_RESET, 0xB6);
+    if(bme280_write_reg(BME280_REG_RESET, 0xB6)) return 0;
     _delay_ms(10);
     
-    bme280_read_calibration();
+    if(bme280_read_calibration()) return 0;
     
     // humidity oversampling x1
-    bme280_write_reg(BME280_REG_CTRL_HUM, 0x01);
+    if(bme280_write_reg(BME280_REG_CTRL_HUM, 0x01)) return 0;
     // temp x1, press x1, normal mode
-    bme280_write_reg(BME280_REG_CTRL_MEAS, 0x27);
+    if(bme280_write_reg(BME280_REG_CTRL_MEAS, 0x27)) return 0;
     // config
-    bme280_write_reg(BME280_REG_CONFIG, 0xA0);
+    if(bme280_write_reg(BME280_REG_CONFIG, 0xA0)) return 0;
     
     return 1;
 }
@@ -191,11 +213,17 @@ uint8_t bme280_read(bme280_data_t *data)
     uint8_t buf[8];
     if(bme280_read_regs(BME280_REG_PRESS_MSB, buf, 8)) return 1;
     
-    int32_t adc_P = (int32_t)((buf[0] << 12) | (buf[1] << 4) | (buf[2] >> 4));
-    int32_t adc_T = (int32_t)((buf[3] << 12) | (buf[4] << 4) | (buf[5] >> 4));
-    int32_t adc_H = (int32_t)((buf[6] << 8) | buf[7]);
+    int32_t adc_P = (int32_t)(((uint32_t)buf[0] << 12)
+                            | ((uint32_t)buf[1] << 4)
+                            | ((uint32_t)buf[2] >> 4));
+    int32_t adc_T = (int32_t)(((uint32_t)buf[3] << 12)
+                            | ((uint32_t)buf[4] << 4)
+                            | ((uint32_t)buf[5] >> 4));
+    int32_t adc_H = (int32_t)(((uint16_t)buf[6] << 8) | buf[7]);
     
     int32_t T = bme280_compensate_temp(adc_T);
+    if(T < -4000 || T > 8500) return 1;
+
     uint32_t P = bme280_compensate_press(adc_P);
     uint32_t H = bme280_compensate_hum(adc_H);
     
