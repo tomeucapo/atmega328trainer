@@ -3,6 +3,8 @@
 	(generator "eeschema")
 	(generator_version "9.0")
 	(uuid "2e3c761b-3336-4723-83a5-ccd0538b5fd9")
+  
+  
 	(paper "A4")
 	(title_block
 		(title "I2C IO Extension Board")
